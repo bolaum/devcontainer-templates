@@ -1,0 +1,19 @@
+name: "Test Templates"
+on:
+  # Ad-hoc manual smoke test (the release workflow runs its own test job).
+  workflow_dispatch:
+    inputs:
+      template:
+        description: "Template to smoke test ('all' for every template under src/)"
+        default: "all"
+        required: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+      - name: Smoke test '${{ inputs.template }}'
+        run: bash scripts/test.sh "${{ inputs.template }}"

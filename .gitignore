@@ -1,0 +1,7 @@
+# Dev Container CLI / test artifacts
+*.tgz
+devcontainer-collection.json
+
+# OS / editor
+.DS_Store
+*.swp

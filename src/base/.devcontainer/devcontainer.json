@@ -1,0 +1,26 @@
+{
+    "name": "base",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "VARIANT": "${templateOption:imageVariant}"
+        }
+    },
+    "features": {
+        "ghcr.io/devcontainers/features/python:1": {
+            "version": "${templateOption:pythonVersion}"
+        },
+        "ghcr.io/devcontainers-extra/features/poetry:2": {},
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "${templateOption:nodeVersion}",
+            "pnpmVersion": "none"
+        },
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    },
+    "mounts": [
+        "source=${localEnv:HOME}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind"
+    ],
+    "initializeCommand": "mkdir -p \"$HOME/.claude\" && touch \"$HOME/.claude/.credentials.json\"",
+    "postCreateCommand": "bash .devcontainer/setup-claude.sh",
+    "remoteUser": "vscode"
+}

@@ -1,0 +1,35 @@
+name: "Release Dev Container Templates"
+on:
+  # Publish when a GitHub Release (with its tag) is published, or manually.
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  # Run the full smoke-test suite first; publish only if it passes.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+      - name: Smoke test all templates
+        run: bash scripts/test.sh all
+
+  publish:
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Publish Templates"
+        uses: devcontainers/action@v1
+        with:
+          publish-templates: "true"
+          base-path-to-templates: "./src"
+          generate-docs: "false"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

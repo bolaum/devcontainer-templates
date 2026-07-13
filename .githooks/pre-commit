@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Regenerate per-template docs when a template's metadata changes, and stage them
+# so the generated README lands in the same commit.
+set -euo pipefail
+
+# Only run when a devcontainer-template.json is part of this commit.
+if ! git diff --cached --name-only | grep -q 'devcontainer-template\.json$'; then
+    exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+"$REPO_ROOT/scripts/generate-docs.sh"
+
+git add "$REPO_ROOT"/src/*/README.md 2>/dev/null || true
