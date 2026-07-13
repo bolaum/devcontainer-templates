@@ -45,7 +45,11 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 - **Claude Code:** official `anthropics/devcontainer-features/claude-code` feature, wired with:
   - `~/.claude/settings.json` (bypassPermissions, dark theme, fullscreen TUI, statusline);
   - `~/.claude/statusline.py` (copy of the host script);
-  - **reused auth** via a bind-mount of the host's `~/.claude/.credentials.json`.
+  - a seeded `~/.claude.json` (`hasCompletedOnboarding: true`) so it skips the login flow;
+  - **reused auth** via a bind-mount of the host's `~/.claude/.credentials.json`;
+  - the VS Code Claude Code extension (`anthropic.claude-code`) preinstalled in the container.
+- **Shell:** `.devcontainer/shell/rc.sh` (aliases/functions/exports) is sourced by
+  `~/.bashrc` and `~/.zshrc` — edit it and open a new terminal to pick up changes.
 
 ### Options
 
@@ -63,24 +67,41 @@ build currently yields: Python 3.12.3, Poetry 2.4.1, pyenv 2.7.3, Node v24.18.0
 
 ## Usage
 
-### Apply to a new project (local)
+### Apply to a new project
+
+`devcontainer templates apply -t` (and the VS Code wizard) take an **OCI reference**
+to a *published* template — **not a local path**. So publish to GHCR first (see
+[Publishing](#publishing-to-ghcr)), then, in an empty project folder:
 
 ```bash
-# In an empty project folder (requires @devcontainers/cli — see Requirements):
-devcontainer templates apply -t ~/projects/devcontainer-templates/src/base
-# or, once published to GHCR:
+# requires @devcontainers/cli — see Requirements
 devcontainer templates apply -t ghcr.io/bolaum/devcontainer-templates/base
 ```
 
 Then open the folder in VS Code → **"Reopen in Container"**, or run
 `devcontainer up --workspace-folder .`.
 
-To override options non-interactively:
+The CLI does not prompt for options; set them non-interactively with `-a` (JSON):
 
 ```bash
-devcontainer templates apply -t ~/projects/devcontainer-templates/src/base \
+devcontainer templates apply -t ghcr.io/bolaum/devcontainer-templates/base \
   -a '{"pythonVersion":"3.12","nodeVersion":"22","imageVariant":"ubuntu-24.04"}'
 ```
+
+### Use a local template (before publishing)
+
+Since the CLI can't apply a local path, `scripts/apply.sh` fills the gap: it prompts
+for each option, substitutes the `${templateOption:…}` placeholders, and copies the
+template into a target folder (copying `.devcontainer/` by hand is not enough — the
+placeholders would stay literal).
+
+```bash
+bash scripts/apply.sh base ~/projects/my-new-project              # prompt for each option
+bash scripts/apply.sh base ~/projects/my-new-project --defaults   # use defaults, no prompts
+```
+
+Then open that folder in VS Code → **"Reopen in Container"**. To just verify the
+template builds and its tools work, run the smoke test instead: `bash scripts/test.sh base`.
 
 ### Claude auth (important)
 
@@ -91,6 +112,15 @@ starts already authenticated, no re-login. History, MCP and other state stay
 
 An `initializeCommand` runs `touch ~/.claude/.credentials.json` on the host first,
 so the bind-mount is always a valid file (even on machines that never logged in).
+
+`setup-claude.sh` also seeds a minimal `~/.claude.json` (`hasCompletedOnboarding: true`).
+Without it, Claude runs its onboarding/login flow even when a valid token is
+mounted — the token is not enough on its own to mark the CLI as onboarded.
+
+Bind-mount permissions on Linux depend on the container user's UID/GID matching the
+host's. `remoteUser: vscode` + `updateRemoteUserUID: true` let the tooling remap the
+container user to the host UID/GID on container creation, so the mounted credentials
+file is readable even when the host user's UID is not the image default (1000).
 
 > ⚠️ **Security note:** any process inside the container gains access to your
 > Claude token. That is the trade-off for not re-authenticating; it is meant for
@@ -117,6 +147,14 @@ docker exec -it -u vscode "$cid" bash
 
 Since the container ships Claude preconfigured and authenticated, running `claude`
 from such an external terminal just works with your reused auth.
+
+To make Claude in that external terminal see your **VS Code context** (open file,
+line selection, diagnostics), run `/ide` inside it and pick the VS Code instance —
+the external terminal shares the container's filesystem and localhost with the
+in-container VS Code Server, so it connects. The `anthropic.claude-code` extension
+is preinstalled in the container (via `customizations.vscode.extensions`), which is
+what makes the IDE discoverable. (The integrated terminal connects automatically; an
+external terminal needs `/ide`.)
 
 ## Publishing to GHCR
 
@@ -183,7 +221,7 @@ Regenerate manually if needed: `bash scripts/generate-docs.sh`
 src/<template>/          # each template (devcontainer-template.json + .devcontainer/)
 test/<template>/         # test.sh for each template
 test/test-utils/         # test helpers (check / reportResults)
-scripts/                 # test.sh (smoke test), bump-version.sh, generate-docs.sh, setup.sh
+scripts/                 # test.sh (smoke test), apply.sh (local apply), bump-version.sh, generate-docs.sh, setup.sh
 .githooks/               # pre-commit hook (regenerates per-template docs)
 .github/workflows/       # release (publish to GHCR) + test (manual smoke test)
 ```

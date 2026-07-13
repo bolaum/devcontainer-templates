@@ -47,8 +47,12 @@ Each template's `.devcontainer/` sets up Claude the same way:
 
 - Installs the CLI via the official feature
   `ghcr.io/anthropics/devcontainer-features/claude-code`.
-- `postCreateCommand` runs `setup-claude.sh`, which copies `claude/settings.json`
-  and `claude/statusline.py` into `~/.claude`.
+- `postCreateCommand` runs `postCreate.sh`, which orchestrates the setup steps:
+  `setup-claude.sh` copies `claude/settings.json` and `claude/statusline.py` into
+  `~/.claude` and seeds a minimal `~/.claude.json` (`hasCompletedOnboarding: true`)
+  so Claude does not launch the onboarding/login flow — the token alone (mounted
+  credentials) is not enough to skip it; `setup-shell.sh` sources
+  `.devcontainer/shell/rc.sh` (aliases/functions) into `~/.bashrc` and `~/.zshrc`.
 - **Auth is reused** via a bind-mount of the host's `~/.claude/.credentials.json`
   (declared in `mounts`). History/MCP/other state stay isolated per container.
 - The `Dockerfile` creates and `chown`s `~/.claude` to the non-root user **before**
@@ -56,6 +60,13 @@ Each template's `.devcontainer/` sets up Claude the same way:
   write into it.
 - `initializeCommand` `touch`es the host credentials file so the mount is always
   a valid file.
+- The VS Code Claude Code extension (`anthropic.claude-code`) is preinstalled via
+  `customizations.vscode.extensions`, so the in-container VS Code Server exposes the
+  IDE integration; an external terminal in the same container can connect with `/ide`.
+- Bind-mount permissions rely on the container user's UID/GID matching the host's.
+  `remoteUser: vscode` + `updateRemoteUserUID: true` (the default, set explicitly)
+  make the tooling remap the container user to the host UID/GID on Linux, so the
+  mounted credentials file is owned correctly even when the host UID is not 1000.
 
 Do not mount the whole `~/.claude` — only the credentials file is shared by design.
 

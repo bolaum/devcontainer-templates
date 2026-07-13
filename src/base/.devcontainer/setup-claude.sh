@@ -15,4 +15,11 @@ cp "$SCRIPT_DIR/claude/settings.json" "$CLAUDE_DIR/settings.json"
 cp "$SCRIPT_DIR/claude/statusline.py" "$CLAUDE_DIR/statusline.py"
 chmod +x "$CLAUDE_DIR/statusline.py" || true
 
-echo "✅ Claude configured at $CLAUDE_DIR (settings.json + statusline.py). Auth via host bind-mount."
+# Mark onboarding as complete so Claude Code does not launch the login/onboarding
+# flow — the actual token comes from the bind-mounted ~/.claude/.credentials.json.
+# Only create it if absent, so a host-mounted ~/.claude.json (if you add one) wins.
+if [ ! -f "$HOME/.claude.json" ]; then
+    echo '{ "hasCompletedOnboarding": true }' > "$HOME/.claude.json"
+fi
+
+echo "✅ Claude configured: $CLAUDE_DIR (settings.json + statusline.py) + ~/.claude.json. Auth via host bind-mount."

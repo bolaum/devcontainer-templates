@@ -18,5 +18,9 @@ check "settings.json present" test -f "$HOME/.claude/settings.json"
 check "statusline.py present" test -f "$HOME/.claude/statusline.py"
 check "settings has bypassPermissions" bash -lic "grep -q bypassPermissions \$HOME/.claude/settings.json"
 
+# Shell customization
+check "shell rc wired" bash -c 'grep -q shell/rc.sh "$HOME/.bashrc"'
+check "alias from rc.sh" bash -lic "alias ll"
+
 # Report results
 reportResults
