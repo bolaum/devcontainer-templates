@@ -23,6 +23,10 @@ check "claude install dir writable" test -w "$HOME/.local/share/claude"
 check "settings.json present" test -f "$HOME/.claude/settings.json"
 check "statusline.py present" test -f "$HOME/.claude/statusline.py"
 check "settings has bypassPermissions" bash -lic "grep -q bypassPermissions \$HOME/.claude/settings.json"
+# Drives both Claude's answers and /voice dictation; unset means English.
+check "dictation language set" bash -c "grep -q '\"language\": \"portuguese\"' \$HOME/.claude/settings.json"
+# Voice dictation on from the first session (hold space), instead of /voice each time.
+check "voice dictation enabled" python3 -c "import json,os,sys; v=json.load(open(os.path.expanduser('~/.claude/settings.json'))).get('voice',{}); sys.exit(0 if v.get('enabled') is True and v.get('mode')=='hold' else 1)"
 # The native installer writes ~/.claude.json at build time, so setup-claude.sh
 # must merge into it: onboarding skipped AND the install metadata preserved.
 check "onboarding marked complete" python3 -c "import json,os,sys; sys.exit(0 if json.load(open(os.path.expanduser('~/.claude.json'))).get('hasCompletedOnboarding') is True else 1)"
@@ -69,6 +73,10 @@ check "browser is headed" bash -c "grep -q '\"headless\": false' \$HOME/.claude/
 check "wayland platform flag" bash -c "grep -q -- '--ozone-platform=wayland' \$HOME/.claude/playwright-mcp.json"
 check "XDG_RUNTIME_DIR writable" bash -c '[ -w "$XDG_RUNTIME_DIR" ]'
 check "chromium actually runs" bash -lic 'CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1); "$CHROME" --headless --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null'
+# @playwright/mcp pins an alpha Playwright whose Chromium revision differs from
+# the stable release: installing the wrong one still passes every check above and
+# only blows up on Claude's first navigation.
+check "MCP browser revision present" bash -lic 'node -e "const {createRequire}=require(\"module\"); const fs=require(\"fs\"); const req=createRequire(process.argv[1]+\"/@playwright/mcp/\"); const p=req(\"playwright-core\").chromium.executablePath(); if(!fs.existsSync(p)){console.error(p);process.exit(1)}" "$(npm root -g)"'
 
 # Shell customization
 check "shell rc wired" bash -c 'grep -q shell/rc.sh "$HOME/.bashrc"'

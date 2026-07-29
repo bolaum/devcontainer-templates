@@ -49,6 +49,8 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   - `~/.claude/settings.json` (bypassPermissions, dark theme, fullscreen TUI, statusline);
   - `~/.claude/statusline.py` (copy of the host script);
   - `hasCompletedOnboarding: true` merged into `~/.claude.json` so it skips the login flow;
+  - `language` (option `claudeLanguage`, default `portuguese`) — one setting drives both
+    Claude's answers and `/voice` dictation; without it dictation transcribes as English;
   - **reused auth** via a bind-mount of the host's `~/.claude/.credentials.json`;
   - the VS Code Claude Code extension (`anthropic.claude-code`) preinstalled in the container.
 - **Browser for Claude (option `installPlaywright`, default `true`):** Playwright with
@@ -74,6 +76,7 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 | `imageVariant` | `ubuntu-24.04` | `ubuntu-24.04`, `ubuntu-22.04` |
 | `pythonVersion` | `os-provided` | `os-provided`, `3.12`, `3.11`, … |
 | `nodeVersion` | `lts` | `lts`, `none`, `22`, `20`, … |
+| `claudeLanguage` | `portuguese` | `portuguese`, `english`, `spanish`, … |
 | `installPlaywright` | `true` | `true`, `false` |
 | `playwrightHeadless` | `false` | `true`, `false` |
 
@@ -192,6 +195,17 @@ How the pieces are split, and why:
 | Chromium's system libraries (31 apt packages) | `Dockerfile`, behind `ARG INSTALL_PLAYWRIGHT` | Baked into the image so creating a container does not reinstall ~200 MB each time. The list comes from `playwright install-deps --dry-run chromium`. |
 | `playwright` + `@playwright/mcp` (npm, global) | `setup-playwright.sh` (postCreate) | Node comes from a feature, which only exists after the image is built. |
 | The browser binary | `setup-playwright.sh`, into a **named volume** (`devcontainer-playwright-browsers`) | Shared by every container from this template, so the ~150 MB download is paid once per machine, not once per project. |
+
+The Playwright version is **not** `latest`: `setup-playwright.sh` reads the version
+`@playwright/mcp` pins (`npm view @playwright/mcp@latest dependencies.playwright`)
+and installs exactly that. The MCP server pins an *alpha* build whose Chromium
+revision differs from the stable release — installing `playwright@latest` next to it
+downloads a revision the server never looks for, so postCreate succeeds and then the
+first navigation fails with `Browser "chromium" is not installed` while the volume
+holds two revisions (~1.3 GB). Reading the pin keeps one revision, shared by the
+server and by your own scripts, and it keeps working across MCP bumps.
+`setup-playwright.sh` verifies the browsers the server resolves are on disk and fails
+at create time instead of at Claude's first navigation.
 
 ### Watching the browser (headed by default)
 

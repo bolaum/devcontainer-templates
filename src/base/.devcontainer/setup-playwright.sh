@@ -24,8 +24,23 @@ if [ -d "$BROWSERS_DIR" ] && [ ! -w "$BROWSERS_DIR" ]; then
 fi
 mkdir -p "$BROWSERS_DIR"
 
-# Both packages at latest so the MCP server and the installed browser build match.
-npm install -g playwright@latest @playwright/mcp@latest
+# The MCP server decides which Playwright version everything else uses.
+#
+# @playwright/mcp pins an *alpha* Playwright build (0.0.78 -> 1.62.0-alpha-…),
+# and that build expects a different Chromium revision than the stable release
+# (chromium-1232 vs chromium-1234). Installing playwright@latest next to it
+# downloads the wrong revision: postCreate succeeds, then the very first
+# browser_navigate fails with `Browser "chromium" is not installed`, and the
+# volume ends up holding both revisions (~1.3 GB). Reading the pin from the MCP
+# package keeps a single revision shared by the server and your own scripts, and
+# survives future MCP bumps.
+mcp_playwright_version="$(npm view @playwright/mcp@latest dependencies.playwright 2>/dev/null || true)"
+if [ -z "$mcp_playwright_version" ]; then
+    echo "⚠️  could not read the playwright version pinned by @playwright/mcp; using latest"
+    mcp_playwright_version="latest"
+fi
+
+npm install -g "playwright@$mcp_playwright_version" @playwright/mcp@latest
 
 # Chromium's system libraries are already baked into the image (see Dockerfile);
 # this is a cheap no-op that self-heals if Playwright ever adds a dependency.
@@ -33,6 +48,15 @@ playwright install-deps chromium
 
 # The browser itself, cached in the shared volume.
 playwright install chromium
+
+# Fail here, at create time, rather than at Claude's first navigation: resolve
+# playwright-core the way the MCP server does and check that the Chromium build
+# it points at is really on disk.
+node -e 'const {createRequire}=require("module"); const fs=require("fs");
+const req=createRequire(process.argv[1]+"/@playwright/mcp/");
+const p=req("playwright-core").chromium.executablePath();
+if(!fs.existsSync(p)){console.error("Chromium build expected by @playwright/mcp is missing: "+p);process.exit(1);}
+console.log("   browser for the MCP server: "+p);' "$(npm root -g)"
 
 # Browser flags:
 #   --no-sandbox           Chrome's sandbox needs privileges the container does

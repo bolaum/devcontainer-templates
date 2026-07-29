@@ -4,6 +4,11 @@
     "skipDangerousModePermissionPrompt": true
   },
   "skipDangerousModePermissionPrompt": true,
+  "language": "${templateOption:claudeLanguage}",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
   "theme": "dark",
   "tui": "fullscreen",
   "statusLine": {

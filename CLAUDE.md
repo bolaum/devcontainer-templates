@@ -65,7 +65,9 @@ Each template's `.devcontainer/` sets up Claude the same way:
   `setup-apt.sh` runs `apt-get update` so `sudo apt install <pkg>` works in a fresh
   container (the image ships with `/var/lib/apt/lists` emptied);
   `setup-claude.sh` copies `claude/settings.json` and `claude/statusline.py` into
-  `~/.claude` and **merges** `hasCompletedOnboarding: true` into `~/.claude.json`
+  `~/.claude` (its `language` comes from the `claudeLanguage` option — the same key
+  drives Claude's answers and `/voice` dictation, which otherwise defaults to English)
+  and **merges** `hasCompletedOnboarding: true` into `~/.claude.json`
   so Claude does not launch the onboarding/login flow — the token alone (mounted
   credentials) is not enough to skip it. It must merge, not overwrite: the native
   installer already creates `~/.claude.json` at build time (`installMethod`,
@@ -102,8 +104,11 @@ Do not mount the whole `~/.claude` — only the credentials file is shared by de
   (host auth is often env-based, so the mount alone carries nothing).
 - Playwright (option `installPlaywright`, default `true`): Chromium's ~31 apt
   dependencies live in the `Dockerfile` behind `ARG INSTALL_PLAYWRIGHT` (baked in,
-  not reinstalled per container); `setup-playwright.sh` npm-installs `playwright` +
-  `@playwright/mcp`, downloads the browser into the shared named volume
+  not reinstalled per container); `setup-playwright.sh` npm-installs `@playwright/mcp`
+  plus **the exact `playwright` version the MCP package pins** — never `latest`, since
+  the server pins an alpha build expecting a different Chromium revision and the
+  mismatch only surfaces at Claude's first navigation — downloads the browser into
+  the shared named volume
   `devcontainer-playwright-browsers`, writes `~/.claude/playwright-mcp.json` and
   registers the server with `playwright-mcp --config <that file>`.
   **`--no-sandbox` is mandatory** — Chrome's sandbox core-dumps in the container.

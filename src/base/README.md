@@ -11,6 +11,7 @@ Isolated Ubuntu environment to start any project without polluting the host. Pyt
 | pythonVersion | Python version installed by the official feature (os-provided uses the system one; pyenv stays available for others). | string | os-provided |
 | nodeVersion | Node version installed via nvm (lts, none, or X / X.Y.Z). Install more later with: nvm install <v>. | string | lts |
 | installPlaywright | Install Playwright with Chromium and register the Playwright MCP server, so Claude can browse pages. Adds a few hundred MB (browsers are cached in a shared volume). | boolean | true |
+| claudeLanguage | Language for Claude's answers AND voice dictation (a single setting controls both). Without it, /voice transcribes as English. Claude Code has no pt-BR variant: use portuguese. | string | portuguese |
 | playwrightHeadless | Run Claude's browser headless. Keep it false on a Wayland desktop to watch the browser window on your screen; set it to true on machines with no desktop session. | boolean | false |
 
 

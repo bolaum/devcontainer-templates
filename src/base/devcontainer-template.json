@@ -1,6 +1,6 @@
 {
     "id": "base",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "name": "Base (Ubuntu + Claude + pyenv/nvm)",
     "description": "Isolated Ubuntu environment to start any project without polluting the host. Python via the official feature + Poetry, pyenv (with build deps) to compile other versions on demand, Node via nvm, GitHub CLI and a CLI toolbox (jq, ripgrep, fd, sqlite3, ffmpeg…). Claude Code comes preinstalled and preconfigured — settings.json, statusline and auth reused from the host — plus microphone, clipboard and a Playwright browser bridged from the host desktop.",
     "documentationURL": "https://github.com/bolaum/devcontainer-templates/tree/main/src/base",
@@ -40,6 +40,20 @@
             "type": "boolean",
             "description": "Install Playwright with Chromium and register the Playwright MCP server, so Claude can browse pages. Adds a few hundred MB (browsers are cached in a shared volume).",
             "default": true
+        },
+        "claudeLanguage": {
+            "type": "string",
+            "description": "Language for Claude's answers AND voice dictation (a single setting controls both). Without it, /voice transcribes as English. Claude Code has no pt-BR variant: use portuguese.",
+            "proposals": [
+                "portuguese",
+                "english",
+                "spanish",
+                "french",
+                "german",
+                "italian",
+                "japanese"
+            ],
+            "default": "portuguese"
         },
         "playwrightHeadless": {
             "type": "boolean",
