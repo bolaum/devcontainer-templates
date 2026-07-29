@@ -17,9 +17,29 @@ chmod +x "$CLAUDE_DIR/statusline.py" || true
 
 # Mark onboarding as complete so Claude Code does not launch the login/onboarding
 # flow — the actual token comes from the bind-mounted ~/.claude/.credentials.json.
-# Only create it if absent, so a host-mounted ~/.claude.json (if you add one) wins.
-if [ ! -f "$HOME/.claude.json" ]; then
-    echo '{ "hasCompletedOnboarding": true }' > "$HOME/.claude.json"
-fi
+#
+# The key is MERGED into ~/.claude.json instead of overwriting the file: the
+# native installer already writes that file at image build time (installMethod,
+# machineID, ...), and clobbering it would throw away the install metadata. An
+# existing "hasCompletedOnboarding" is left untouched, so a host-mounted
+# ~/.claude.json (if you add one) still wins.
+python3 - "$HOME/.claude.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        config = json.load(f)
+    if not isinstance(config, dict):
+        raise ValueError("not a JSON object")
+except (FileNotFoundError, ValueError):
+    config = {}
+
+config.setdefault("hasCompletedOnboarding", True)
+
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+PY
 
 echo "✅ Claude configured: $CLAUDE_DIR (settings.json + statusline.py) + ~/.claude.json. Auth via host bind-mount."

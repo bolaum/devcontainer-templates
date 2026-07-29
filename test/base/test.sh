@@ -23,6 +23,10 @@ check "claude install dir writable" test -w "$HOME/.local/share/claude"
 check "settings.json present" test -f "$HOME/.claude/settings.json"
 check "statusline.py present" test -f "$HOME/.claude/statusline.py"
 check "settings has bypassPermissions" bash -lic "grep -q bypassPermissions \$HOME/.claude/settings.json"
+# The native installer writes ~/.claude.json at build time, so setup-claude.sh
+# must merge into it: onboarding skipped AND the install metadata preserved.
+check "onboarding marked complete" python3 -c "import json,os,sys; sys.exit(0 if json.load(open(os.path.expanduser('~/.claude.json'))).get('hasCompletedOnboarding') is True else 1)"
+check "install metadata preserved" python3 -c "import json,os,sys; sys.exit(0 if json.load(open(os.path.expanduser('~/.claude.json'))).get('installMethod') == 'native' else 1)"
 
 # Shell customization
 check "shell rc wired" bash -c 'grep -q shell/rc.sh "$HOME/.bashrc"'

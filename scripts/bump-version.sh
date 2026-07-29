@@ -73,7 +73,8 @@ fi
 cat <<'EOF'
 
 Next steps:
+  bash scripts/test.sh all                        # the release workflow does not test
   git commit -am "chore: bump template version"   # pre-commit hook regenerates the docs
-  # then publish a GitHub Release (with a tag) to run test + release,
-  # or trigger the workflows manually from the Actions tab.
+  # then publish a GitHub Release (with a tag) to publish the templates,
+  # or trigger the release workflow manually from the Actions tab.
 EOF

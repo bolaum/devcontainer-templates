@@ -6,18 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Run the full smoke-test suite first; publish only if it passes.
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
-      - name: Smoke test all templates
-        run: bash scripts/test.sh all
-
+  # No test job on purpose: the smoke tests are run locally before releasing
+  # (bash scripts/test.sh all). Run the "Test Templates" workflow manually if you
+  # want them on a runner too.
   publish:
-    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       packages: write

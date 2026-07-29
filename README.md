@@ -48,7 +48,7 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   used because its root-owned `npm install -g` breaks self-updates. Wired with:
   - `~/.claude/settings.json` (bypassPermissions, dark theme, fullscreen TUI, statusline);
   - `~/.claude/statusline.py` (copy of the host script);
-  - a seeded `~/.claude.json` (`hasCompletedOnboarding: true`) so it skips the login flow;
+  - `hasCompletedOnboarding: true` merged into `~/.claude.json` so it skips the login flow;
   - **reused auth** via a bind-mount of the host's `~/.claude/.credentials.json`;
   - the VS Code Claude Code extension (`anthropic.claude-code`) preinstalled in the container.
 - **Shell:** `.devcontainer/shell/rc.sh` (aliases/functions/exports) is sourced by
@@ -183,9 +183,9 @@ uses the built-in `GITHUB_TOKEN` (needs `write:packages`, granted by the workflo
 
 [`test.yaml`](./.github/workflows/test.yaml) runs the smoke test **manually**
 (Actions → *Test Templates* → *Run workflow*, pick one template or `all`) — not on
-every PR. The **release workflow runs the same smoke test** (`scripts/test.sh all`)
-in its own `test` job and publishes only if it passes. Both bring up each
-template's container and execute `test/<template>/test.sh` (checks python3, poetry,
+every PR. The **release workflow does not run it**: the smoke test is meant to be
+run locally before releasing, since a runner build takes minutes. It brings up each
+template's container and executes `test/<template>/test.sh` (checks python3, poetry,
 pyenv, node/nvm, claude and the `~/.claude` wiring).
 
 Both the workflow and local runs use the same script — run it locally with:
