@@ -52,7 +52,18 @@ Each template's `.devcontainer/` sets up Claude the same way:
   **Do not use the `ghcr.io/anthropics/devcontainer-features/claude-code` feature:**
   it runs `npm install -g` as root, which leaves the package root-owned inside the
   shared nvm global `node_modules` and makes every update fail with `EACCES`.
+- **Desktop bridges (Linux hosts):** `/voice` records with SoX's `rec` or ALSA's
+  `arecord`, and image paste shells out to `wl-paste`/`xclip`. The container has
+  no `/dev/snd` and no display, so `mounts` bind the host's PipeWire/PulseAudio
+  socket (`$XDG_RUNTIME_DIR/pulse/native`) and Wayland socket
+  (`$XDG_RUNTIME_DIR/wayland-0`) to fixed paths under `/tmp`, pointed at by
+  `containerEnv` (`PULSE_SERVER`, absolute `WAYLAND_DISPLAY`). The `Dockerfile`
+  installs `sox` **plus `libsox-fmt-pulse`** (sox alone only gets the ALSA backend,
+  which has no card to open here) and writes `/etc/asound.conf` routing ALSA to
+  pulse so `arecord` works too.
 - `postCreateCommand` runs `postCreate.sh`, which orchestrates the setup steps:
+  `setup-apt.sh` runs `apt-get update` so `sudo apt install <pkg>` works in a fresh
+  container (the image ships with `/var/lib/apt/lists` emptied);
   `setup-claude.sh` copies `claude/settings.json` and `claude/statusline.py` into
   `~/.claude` and **merges** `hasCompletedOnboarding: true` into `~/.claude.json`
   so Claude does not launch the onboarding/login flow — the token alone (mounted
@@ -66,8 +77,9 @@ Each template's `.devcontainer/` sets up Claude the same way:
 - The `Dockerfile` creates and `chown`s `~/.claude` to the non-root user **before**
   the mount, so the bind-mount lands in a user-writable dir and `postCreate` can
   write into it.
-- `initializeCommand` `touch`es the host credentials file so the mount is always
-  a valid file.
+- `initializeCommand` runs `initialize.sh` **on the host**, which creates every
+  bind-mount source that may be missing (credentials file, desktop sockets) —
+  Docker would otherwise create a root-owned directory in its place.
 - The VS Code Claude Code extension (`anthropic.claude-code`) is preinstalled via
   `customizations.vscode.extensions`, so the in-container VS Code Server exposes the
   IDE integration; an external terminal in the same container can connect with `/ide`.
@@ -85,6 +97,21 @@ Do not mount the whole `~/.claude` — only the credentials file is shared by de
 - Node: official `devcontainers/features/node` (nvm-based; option `nodeVersion`; no pnpm).
 - pyenv: installed with build deps in the `Dockerfile` for compiling Python
   versions on demand (the official feature provides the default Python).
+- GitHub CLI: official `devcontainers/features/github-cli`, with the host's
+  `~/.config/gh` mounted and `GH_TOKEN`/`GITHUB_TOKEN` forwarded via `containerEnv`
+  (host auth is often env-based, so the mount alone carries nothing).
+- Playwright (option `installPlaywright`, default `true`): Chromium's ~31 apt
+  dependencies live in the `Dockerfile` behind `ARG INSTALL_PLAYWRIGHT` (baked in,
+  not reinstalled per container); `setup-playwright.sh` npm-installs `playwright` +
+  `@playwright/mcp`, downloads the browser into the shared named volume
+  `devcontainer-playwright-browsers`, writes `~/.claude/playwright-mcp.json` and
+  registers the server with `playwright-mcp --config <that file>`.
+  **`--no-sandbox` is mandatory** — Chrome's sandbox core-dumps in the container.
+  Headed by default (option `playwrightHeadless`, default `false`): the browser is a
+  native Wayland client of the host compositor via `--ozone-platform=wayland` and the
+  socket already mounted for the clipboard, so you can watch Claude navigate.
+- CLI toolbox in the `Dockerfile`: jq, ripgrep, fd-find (symlinked to `fd`), tree,
+  unzip/zip, less, sqlite3, postgresql-client, shellcheck, shfmt, ffmpeg, imagemagick.
 
 ## Working here
 

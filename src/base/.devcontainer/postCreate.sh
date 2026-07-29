@@ -5,5 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+bash "$SCRIPT_DIR/setup-apt.sh"
 bash "$SCRIPT_DIR/setup-claude.sh"
+bash "$SCRIPT_DIR/setup-playwright.sh"
 bash "$SCRIPT_DIR/setup-shell.sh"

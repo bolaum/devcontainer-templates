@@ -3,7 +3,8 @@
     "build": {
         "dockerfile": "Dockerfile",
         "args": {
-            "VARIANT": "${templateOption:imageVariant}"
+            "VARIANT": "${templateOption:imageVariant}",
+            "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}"
         }
     },
     "features": {
@@ -14,7 +15,8 @@
         "ghcr.io/devcontainers/features/node:1": {
             "version": "${templateOption:nodeVersion}",
             "pnpmVersion": "none"
-        }
+        },
+        "ghcr.io/devcontainers/features/github-cli:1": {}
     },
     "customizations": {
         "vscode": {
@@ -24,9 +26,34 @@
         }
     },
     "mounts": [
-        "source=${localEnv:HOME}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind"
+        "source=${localEnv:HOME}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind",
+        // Microphone (/voice) and clipboard image paste, bridged from the host
+        // desktop. Linux only; on a Wayland session other than wayland-0, change
+        // the source here and in initialize.sh.
+        "source=${localEnv:XDG_RUNTIME_DIR}/pulse/native,target=/tmp/host-pulse,type=bind",
+        "source=${localEnv:XDG_RUNTIME_DIR}/wayland-0,target=/tmp/host-wayland,type=bind",
+        // gh config from the host (empty when you authenticate with GH_TOKEN only).
+        "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind",
+        // Named volume shared by every container built from this template, so the
+        // ~150 MB Chromium download happens once and not per project.
+        "source=devcontainer-playwright-browsers,target=/home/vscode/.cache/ms-playwright,type=volume"
     ],
-    "initializeCommand": "mkdir -p \"$HOME/.claude\" && touch \"$HOME/.claude/.credentials.json\"",
+    "containerEnv": {
+        "PULSE_SERVER": "unix:/tmp/host-pulse",
+        // An absolute WAYLAND_DISPLAY is used as-is, so the socket does not have
+        // to sit in the container's XDG_RUNTIME_DIR.
+        "WAYLAND_DISPLAY": "/tmp/host-wayland",
+        "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}",
+        "PLAYWRIGHT_HEADLESS": "${templateOption:playwrightHeadless}",
+        // Wayland clients (a headed Chromium) expect a private runtime dir; the
+        // Dockerfile creates it since the container has no logind session.
+        "XDG_RUNTIME_DIR": "/tmp/xdg-runtime",
+        // Forwarded so `gh` works when the host authenticates through the env var
+        // instead of ~/.config/gh. Empty is the same as unset for gh.
+        "GH_TOKEN": "${localEnv:GH_TOKEN}",
+        "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+    },
+    "initializeCommand": "bash .devcontainer/initialize.sh",
     "postCreateCommand": "bash .devcontainer/postCreate.sh",
     "remoteUser": "vscode",
     "updateRemoteUserUID": true

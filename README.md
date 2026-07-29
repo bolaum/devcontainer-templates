@@ -51,6 +51,19 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   - `hasCompletedOnboarding: true` merged into `~/.claude.json` so it skips the login flow;
   - **reused auth** via a bind-mount of the host's `~/.claude/.credentials.json`;
   - the VS Code Claude Code extension (`anthropic.claude-code`) preinstalled in the container.
+- **Browser for Claude (option `installPlaywright`, default `true`):** Playwright with
+  Chromium plus the `@playwright/mcp` server registered in Claude, so it can actually
+  open and read pages. See [Browsing with Playwright](#browsing-with-playwright).
+- **GitHub CLI:** official `devcontainers/features/github-cli` feature, with the host's
+  `~/.config/gh` bind-mounted and `GH_TOKEN`/`GITHUB_TOKEN` forwarded.
+- **Command-line toolbox:** `jq`, `ripgrep` (`rg`), `fd`, `tree`, `unzip`/`zip`, `less`,
+  `sqlite3`, `postgresql-client` (`psql`), `shellcheck`, `shfmt`, `ffmpeg`, `imagemagick`.
+- **Microphone and clipboard (Linux hosts):** `/voice` dictation and image paste
+  work inside the container. The host's PipeWire/PulseAudio and Wayland sockets are
+  bind-mounted, and `sox` + `libsox-fmt-pulse`, `alsa-utils`, `wl-clipboard` and
+  `xclip` are preinstalled. See [Microphone and clipboard](#microphone-and-clipboard).
+- **apt ready to use:** `postCreate` runs `apt-get update`, so `sudo apt install <pkg>`
+  works in a fresh container without running `apt update` first.
 - **Shell:** `.devcontainer/shell/rc.sh` (aliases/functions/exports) is sourced by
   `~/.bashrc` and `~/.zshrc` — edit it and open a new terminal to pick up changes.
 
@@ -61,12 +74,14 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 | `imageVariant` | `ubuntu-24.04` | `ubuntu-24.04`, `ubuntu-22.04` |
 | `pythonVersion` | `os-provided` | `os-provided`, `3.12`, `3.11`, … |
 | `nodeVersion` | `lts` | `lts`, `none`, `22`, `20`, … |
+| `installPlaywright` | `true` | `true`, `false` |
+| `playwrightHeadless` | `false` | `true`, `false` |
 
 ### Verified versions
 
 The smoke test builds the container and asserts the toolchain end to end. A fresh
 build currently yields: Python 3.12.3, Poetry 2.4.1, pyenv 2.7.3, Node v24.18.1
-(nvm), Claude Code 2.1.220.
+(nvm), Claude Code 2.1.220, gh 2.96.0, Playwright 1.62.0 (Chromium).
 
 ## Usage
 
@@ -113,12 +128,16 @@ from the host (read-write, so token refresh persists back). Claude therefore
 starts already authenticated, no re-login. History, MCP and other state stay
 **isolated** per container — only the credential is shared.
 
-An `initializeCommand` runs `touch ~/.claude/.credentials.json` on the host first,
-so the bind-mount is always a valid file (even on machines that never logged in).
+An `initializeCommand` runs `.devcontainer/initialize.sh` on the host first, which
+creates `~/.claude/.credentials.json` if missing (even on machines that never logged
+in) along with the other bind-mount sources, so no mount ever resolves to a
+root-owned directory created by Docker.
 
-`setup-claude.sh` also seeds a minimal `~/.claude.json` (`hasCompletedOnboarding: true`).
+`setup-claude.sh` also merges `hasCompletedOnboarding: true` into `~/.claude.json`.
 Without it, Claude runs its onboarding/login flow even when a valid token is
-mounted — the token is not enough on its own to mark the CLI as onboarded.
+mounted — the token is not enough on its own to mark the CLI as onboarded. It has to
+*merge*: the native installer already writes that file during the image build, so
+creating it only when missing would silently skip the flag.
 
 Bind-mount permissions on Linux depend on the container user's UID/GID matching the
 host's. `remoteUser: vscode` + `updateRemoteUserUID: true` let the tooling remap the
@@ -159,12 +178,84 @@ is preinstalled in the container (via `customizations.vscode.extensions`), which
 what makes the IDE discoverable. (The integrated terminal connects automatically; an
 external terminal needs `/ide`.)
 
+## Browsing with Playwright
+
+With `installPlaywright` (default `true`), the container gets Chromium **and** the
+`@playwright/mcp` server registered in Claude's user scope, which is what turns
+"Claude can run browser scripts" into "Claude can browse". Check it with
+`claude mcp list` or `/mcp` inside a session.
+
+How the pieces are split, and why:
+
+| Piece | Where | Why |
+|-------|-------|-----|
+| Chromium's system libraries (31 apt packages) | `Dockerfile`, behind `ARG INSTALL_PLAYWRIGHT` | Baked into the image so creating a container does not reinstall ~200 MB each time. The list comes from `playwright install-deps --dry-run chromium`. |
+| `playwright` + `@playwright/mcp` (npm, global) | `setup-playwright.sh` (postCreate) | Node comes from a feature, which only exists after the image is built. |
+| The browser binary | `setup-playwright.sh`, into a **named volume** (`devcontainer-playwright-browsers`) | Shared by every container from this template, so the ~150 MB download is paid once per machine, not once per project. |
+
+### Watching the browser (headed by default)
+
+With `playwrightHeadless` at its default `false`, Chromium renders **on your desktop
+through the same Wayland socket used for the clipboard** — the window opens on your
+screen and you watch Claude drive it. Set the option to `true` on a machine with no
+desktop session.
+
+The launch flags live in `~/.claude/playwright-mcp.json` (generated by
+`setup-playwright.sh`, passed with `playwright-mcp --config`):
+
+| Flag | Why |
+|------|-----|
+| `--no-sandbox` | Chrome's sandbox needs privileges the container does not have; without it the browser aborts with a core dump, leaving an MCP server that is registered but useless. |
+| `--disable-dev-shm-usage` | Docker's default `/dev/shm` is 64 MB, too small for Chromium. |
+| `--ozone-platform=wayland` (headed only) | Makes Chromium a native Wayland client of your compositor. |
+
+Rendering is software-only (the container has no `/dev/dri`), which is fine for
+watching. Chromium logs D-Bus and DRM errors on startup in a container — they are
+noise, not failures.
+
+Set `installPlaywright` to `false` when applying the template to skip all of it.
+
+## Microphone and clipboard
+
+Claude Code shells out to host tools for two features, and neither works in a
+container out of the box: `/voice` dictation records through SoX's `rec` (or ALSA's
+`arecord`), and pasting an image reads the clipboard with `wl-paste` (or `xclip`).
+A container has no `/dev/snd` and no display of its own.
+
+The template bridges both from the host, on **Linux**:
+
+| What | How |
+|------|-----|
+| Audio | `$XDG_RUNTIME_DIR/pulse/native` bind-mounted to `/tmp/host-pulse`, with `PULSE_SERVER=unix:/tmp/host-pulse` |
+| Clipboard | `$XDG_RUNTIME_DIR/wayland-0` bind-mounted to `/tmp/host-wayland`, with `WAYLAND_DISPLAY=/tmp/host-wayland` (an absolute value is used as-is by libwayland) |
+| Packages | `sox`, `libsox-fmt-pulse`, `alsa-utils`, `libasound2-plugins`, `pulseaudio-utils`, `wl-clipboard`, `xclip` |
+| ALSA | `/etc/asound.conf` routes `default` to pulse, so `arecord` finds a device |
+
+`libsox-fmt-pulse` is the non-obvious bit: installing `sox` alone only brings the
+ALSA backend, which has no card to open here, so `rec` fails even though sox is
+installed.
+
+Check it from inside the container with `pactl info` (should report the host's
+PulseAudio/PipeWire server), `rec -q -t wav /tmp/t.wav trim 0 1` (should produce a
+non-empty file) and `wl-paste --list-types` (should list what you last copied — copy
+an image and it lists `image/png`).
+
+Notes:
+
+- If your Wayland session is not `wayland-0`, change the mount source in
+  `.devcontainer/devcontainer.json` and the placeholder in `.devcontainer/initialize.sh`.
+- On a host with no desktop session (macOS, a CI runner), `initialize.sh` creates
+  placeholder files so the container still builds — it just has no audio or clipboard.
+- The VS Code Claude Code extension does **not** support dictation in Dev Containers
+  (the microphone is on the local machine and the extension runs on the remote host);
+  this bridge is for the CLI running inside the container.
+
 ## Publishing to GHCR
 
 The [`release.yaml`](./.github/workflows/release.yaml) workflow publishes the
 templates to `ghcr.io/<owner>/<repo>/<template>`. It runs when a **GitHub Release
-(with its tag) is published**, or manually (Actions → *Run workflow*). It runs the
-**full smoke-test suite first and publishes only if it passes**.
+(with its tag) is published**, or manually (Actions → *Run workflow*). It only
+publishes — **run `bash scripts/test.sh all` locally before releasing**.
 
 Typical flow:
 
