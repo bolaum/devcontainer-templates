@@ -42,7 +42,10 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   so you can compile other Python versions on demand: `pyenv install 3.13.1`.
 - **Node:** official `devcontainers/features/node` feature (via nvm; option
   `nodeVersion`, default `lts`). Add more with `nvm install 22`. No pnpm.
-- **Claude Code:** official `anthropics/devcontainer-features/claude-code` feature, wired with:
+- **Claude Code:** installed with the official native installer
+  (`https://claude.ai/install.sh`) as the non-root user, so it lives under
+  `~/.local` and updates itself — the `claude-code` devcontainer feature is not
+  used because its root-owned `npm install -g` breaks self-updates. Wired with:
   - `~/.claude/settings.json` (bypassPermissions, dark theme, fullscreen TUI, statusline);
   - `~/.claude/statusline.py` (copy of the host script);
   - a seeded `~/.claude.json` (`hasCompletedOnboarding: true`) so it skips the login flow;
@@ -62,8 +65,8 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 ### Verified versions
 
 The smoke test builds the container and asserts the toolchain end to end. A fresh
-build currently yields: Python 3.12.3, Poetry 2.4.1, pyenv 2.7.3, Node v24.18.0
-(nvm), Claude Code 2.1.207.
+build currently yields: Python 3.12.3, Poetry 2.4.1, pyenv 2.7.3, Node v24.18.1
+(nvm), Claude Code 2.1.220.
 
 ## Usage
 

@@ -45,8 +45,13 @@ scripts/         test.sh, bump-version.sh, generate-docs.sh, setup.sh
 
 Each template's `.devcontainer/` sets up Claude the same way:
 
-- Installs the CLI via the official feature
-  `ghcr.io/anthropics/devcontainer-features/claude-code`.
+- Installs the CLI in the `Dockerfile` with the official **native installer**
+  (`curl -fsSL https://claude.ai/install.sh | bash`), run as the non-root user, so
+  everything lands under `$HOME` (`~/.local/bin/claude` →
+  `~/.local/share/claude/versions/`) and the CLI can update itself.
+  **Do not use the `ghcr.io/anthropics/devcontainer-features/claude-code` feature:**
+  it runs `npm install -g` as root, which leaves the package root-owned inside the
+  shared nvm global `node_modules` and makes every update fail with `EACCES`.
 - `postCreateCommand` runs `postCreate.sh`, which orchestrates the setup steps:
   `setup-claude.sh` copies `claude/settings.json` and `claude/statusline.py` into
   `~/.claude` and seeds a minimal `~/.claude.json` (`hasCompletedOnboarding: true`)

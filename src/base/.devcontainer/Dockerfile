@@ -39,4 +39,14 @@ RUN curl -fsSL https://pyenv.run | bash \
             echo 'eval "$(pyenv init -)"'; \
         } >> "$rc"; \
     done
+
+# Claude Code via the official native installer, run as the non-root user.
+# NOT the claude-code devcontainer feature: that feature runs `npm install -g`
+# as root, leaving the package root-owned inside the shared nvm global
+# node_modules, so the CLI cannot update itself (EACCES) from the vscode user.
+# The native installer keeps everything under $HOME (~/.local/bin/claude ->
+# ~/.local/share/claude/versions/), which is user-owned and self-updating.
+# HOME is set explicitly because it is not guaranteed after `USER vscode`.
+ENV PATH="/home/vscode/.local/bin:${PATH}"
+RUN HOME=/home/vscode bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
 USER root

@@ -13,6 +13,12 @@ check "pyenv" bash -lic "pyenv --version"
 check "node (via nvm)" bash -lic "node --version"
 check "claude-code" bash -lic "claude --version"
 
+# Claude must be installed under $HOME and owned by the current user, otherwise
+# it cannot update itself (the npm-global install from the claude-code feature
+# was root-owned and failed with EACCES).
+check "claude installed in \$HOME" bash -lic '[ "$(command -v claude)" = "$HOME/.local/bin/claude" ]'
+check "claude install dir writable" test -w "$HOME/.local/share/claude"
+
 # Claude wiring
 check "settings.json present" test -f "$HOME/.claude/settings.json"
 check "statusline.py present" test -f "$HOME/.claude/statusline.py"
