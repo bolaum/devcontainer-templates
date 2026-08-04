@@ -13,7 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
-      contents: read
+      # write, not read: besides pushing to GHCR, the action tags the commit as
+      # <template-id>_<version> (e.g. template_base_1.4.0) so each template's own
+      # version is traceable to a commit — they version independently of the
+      # repo's release tag. With contents: read it logs "Failed to automatically
+      # add repo tag" and carries on.
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
