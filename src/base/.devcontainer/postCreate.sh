@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
 # postCreate orchestrator: runs the container's setup steps in order.
 # Add new setup steps here rather than chaining them in devcontainer.json.
+#
+# Order matters in two places:
+#   - setup-persist.sh goes FIRST: the persisted volumes must be writable before
+#     anything writes to them;
+#   - setup-apt.sh goes LAST: refreshing the package lists is the slowest step
+#     and the one most at the mercy of slow mirrors, and nothing else here needs
+#     it — so everything you are actually waiting for is ready before it starts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-bash "$SCRIPT_DIR/setup-apt.sh"
-bash "$SCRIPT_DIR/setup-claude.sh"
-bash "$SCRIPT_DIR/setup-playwright.sh"
-bash "$SCRIPT_DIR/setup-shell.sh"
+STEPS=(
+    setup-persist.sh
+    setup-claude.sh
+    setup-playwright.sh
+    setup-shell.sh
+    setup-apt.sh
+)
+
+total=${#STEPS[@]}
+step_no=0
+for step in "${STEPS[@]}"; do
+    step_no=$((step_no + 1))
+    printf '\n▶ [%d/%d] %s\n' "$step_no" "$total" "$step"
+    bash "$SCRIPT_DIR/$step"
+done
+
+printf '\n🎉 postCreate finished — %d steps.\n' "$total"

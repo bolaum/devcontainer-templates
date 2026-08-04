@@ -10,9 +10,20 @@ set -euo pipefail
 mkdir -p "$HOME/.claude"
 touch "$HOME/.claude/.credentials.json"
 
-# gh config reused from the host (may legitimately be empty when you authenticate
-# with GH_TOKEN/GITHUB_TOKEN instead of `gh auth login`).
-mkdir -p "$HOME/.config/gh"
+# SSH agent socket, forwarded so the container can sign with your key without
+# ever holding it. The agent picks a random socket name per session (and the path
+# differs per desktop), so point a fixed path at whatever is live right now —
+# that fixed path is what devcontainer.json mounts.
+agent_link="$HOME/.ssh/devcontainer-agent.sock"
+mkdir -p "$HOME/.ssh"
+rm -f "$agent_link"
+if [ -S "${SSH_AUTH_SOCK:-}" ]; then
+    ln -s "$SSH_AUTH_SOCK" "$agent_link"
+else
+    # No agent running (or a headless host): a placeholder keeps the mount valid
+    # and the container simply ends up without agent forwarding.
+    touch "$agent_link"
+fi
 
 # Desktop sockets (Linux): PipeWire/PulseAudio for the microphone, Wayland for
 # clipboard image paste. On a host without them (no desktop session, CI, macOS)

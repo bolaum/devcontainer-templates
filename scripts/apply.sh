@@ -52,7 +52,10 @@ trap 'rm -f "$sed_script"' EXIT
 
 if [ "$(jq -r '.options // empty' "$meta")" != "" ]; then
     while IFS= read -r opt; do
-        default="$(jq -r ".options.${opt}.default // \"\"" "$meta")"
+        # `has("default")` rather than `.default // ""`: jq's alternative
+        # operator also fires on `false`, which turned every boolean option
+        # defaulting to false into an empty string.
+        default="$(jq -r ".options.${opt} | if has(\"default\") then .default else \"\" end" "$meta")"
         desc="$(jq -r ".options.${opt}.description // \"\"" "$meta")"
         proposals="$(jq -r "(.options.${opt}.proposals // .options.${opt}.enum // []) | join(\", \")" "$meta")"
         value="$default"

@@ -19,7 +19,9 @@ you locally — the GitHub Actions workflows install the CLI themselves):
   # or, with a bundled Node.js (no npm needed):
   curl -fsSL https://raw.githubusercontent.com/devcontainers/cli/main/scripts/install.sh | sh
   ```
-- Docker
+- Docker **with BuildKit** — the default since Docker 23, and what both `buildx`
+  and the devcontainer CLI use. The `Dockerfile` mounts BuildKit caches for apt
+  (see [Build speed](#build-speed)), so building with `DOCKER_BUILDKIT=0` fails.
 - `jq` (used by the local test runner)
 
 ## Templates
@@ -56,10 +58,15 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 - **Browser for Claude (option `installPlaywright`, default `true`):** Playwright with
   Chromium plus the `@playwright/mcp` server registered in Claude, so it can actually
   open and read pages. See [Browsing with Playwright](#browsing-with-playwright).
-- **GitHub CLI:** official `devcontainers/features/github-cli` feature, with the host's
-  `~/.config/gh` bind-mounted and `GH_TOKEN`/`GITHUB_TOKEN` forwarded.
-- **Command-line toolbox:** `jq`, `ripgrep` (`rg`), `fd`, `tree`, `unzip`/`zip`, `less`,
-  `sqlite3`, `postgresql-client` (`psql`), `shellcheck`, `shfmt`, `ffmpeg`, `imagemagick`.
+- **GitHub CLI:** official `devcontainers/features/github-cli` feature. The container
+  inherits **no** GitHub credential from the host — `gh-login` sets up a token scoped
+  to the current repository, and `git push` over ssh uses the forwarded agent.
+  See [GitHub access](#github-access).
+- **Command-line toolbox:** `jq`, `ripgrep` (`rg`), `fd`, `tree`, `unzip`/`zip`,
+  `less`, `ffmpeg`, `imagemagick` in the base layer; `sqlite3`,
+  `postgresql-client` (`psql`), `shellcheck` and `shfmt` in a final **extra tools**
+  layer you can extend — either by editing that list in the `Dockerfile` or via the
+  `extraPackages` option. Being last, changing it leaves every other layer cached.
 - **Microphone and clipboard (Linux hosts):** `/voice` dictation and image paste
   work inside the container. The host's PipeWire/PulseAudio and Wayland sockets are
   bind-mounted, and `sox` + `libsox-fmt-pulse`, `alsa-utils`, `wl-clipboard` and
@@ -68,6 +75,9 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   works in a fresh container without running `apt update` first.
 - **Shell:** `.devcontainer/shell/rc.sh` (aliases/functions/exports) is sourced by
   `~/.bashrc` and `~/.zshrc` — edit it and open a new terminal to pick up changes.
+- **State that survives a rebuild:** Claude sessions, shell history, VS Code
+  extensions installed by hand and the package manager caches live in named
+  volumes scoped to the project. See [What survives a rebuild](#what-survives-a-rebuild).
 
 ### Options
 
@@ -77,6 +87,8 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 | `pythonVersion` | `os-provided` | `os-provided`, `3.12`, `3.11`, … |
 | `nodeVersion` | `lts` | `lts`, `none`, `22`, `20`, … |
 | `claudeLanguage` | `portuguese` | `portuguese`, `english`, `spanish`, … |
+| `aptMirror` | `auto` | `auto`, `keep`, a country code (`BR`), a mirror URL |
+| `buildProgress` | `plain` | `plain`, `auto` |
 | `installPlaywright` | `true` | `true`, `false` |
 | `playwrightHeadless` | `false` | `true`, `false` |
 
@@ -263,6 +275,215 @@ Notes:
 - The VS Code Claude Code extension does **not** support dictation in Dev Containers
   (the microphone is on the local machine and the extension runs on the remote host);
   this bridge is for the CLI running inside the container.
+
+## Build speed
+
+Two things in the `Dockerfile` exist purely so an uncached build does not crawl.
+
+### It picks the fastest apt mirror
+
+Before any package is installed, `pick-apt-mirror.sh` detects the country by IP,
+fetches the official mirror list for it (`mirrors.ubuntu.com/<CC>.txt`),
+benchmarks those mirrors **in parallel** against the default, and switches only
+if one wins by a clear margin.
+
+The point is resilience as much as speed. This was written during a Canonical
+outage that took `archive.ubuntu.com` and `security.ubuntu.com` down: the two apt
+layers were taking 253s and 206s to move 42 MB, and dropped to 49.5s and 35.8s
+once the build was pointed at a working mirror. Picking the mirror costs ~9s.
+
+Those numbers are what a *broken* default looks like, not a typical gain — when
+`archive.ubuntu.com` is healthy it usually wins the benchmark or loses by too
+little to matter, and stays. That is the intent: the 1.5x margin exists so a
+well-maintained default is not swapped for a random mirror that measured slightly
+better once. Every failure path (no network, unknown country, no mirror list,
+nothing faster) keeps the image default and never fails the build.
+
+Controlled by the `aptMirror` option: `auto` (default), `keep` to disable, a
+country code like `BR` to skip detection, or a full mirror URL.
+
+`security.ubuntu.com` is deliberately left alone — it publishes security updates
+first and mirrors lag behind it.
+
+### apt caches live in BuildKit, not in the image
+
+Each apt layer would normally end with `rm -rf /var/lib/apt/lists/*`, purely to
+keep ~45 MB of package indexes out of the image — which forces the *next* layer
+to run a full `apt-get update` again.
+
+Instead, the lists and the downloaded `.deb` files are mounted as BuildKit
+caches:
+
+```dockerfile
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y ...
+```
+
+They stay out of the image by construction, are shared across layers, and
+survive between builds. The base image's `docker-clean` hook is removed for this
+to work — it wipes the archives after every install, which would leave the cache
+permanently empty.
+
+This is why BuildKit is a hard requirement (see [Requirements](#requirements)).
+
+### Seeing which layer is slow
+
+BuildKit's compact progress output truncates each step at around 60 characters,
+and `RUN --mount=type=cache,target=/var/cache/apt,sharing=locked` fills that on
+its own — so every apt layer shows up as the same unhelpful
+`RUN --mount=type=cache,` and you cannot tell which one is taking the time.
+
+That is why **`buildProgress` defaults to `plain`**: the template passes
+`--progress=plain` to `docker build` through `build.options`, so every step is
+printed in full. It works the same in VS Code and from the CLI, since the
+extension runs the same code. Set the option to `auto` for the quieter view.
+
+(`BUILDKIT_PROGRESS=plain` in the environment does the same thing for a one-off
+run, but for VS Code it has to be set on the VS Code process itself — the
+template option avoids that.)
+
+Each apt layer starts by echoing what it is, so they announce themselves:
+
+```
+=== apt: pyenv build dependencies ===
+=== apt: desktop bridges (microphone + clipboard) ===
+=== apt: CLI toolbox (ffmpeg and imagemagick make this the slow one) ===
+=== apt: Chromium system libraries ===
+```
+
+## GitHub access
+
+A container is a place where a lot of code you did not write gets to run: install
+scripts, build tooling, an agent with broad permissions. So the template gives it
+**no credential that reaches more than the project itself**.
+
+The split is deliberate: **git goes through the forwarded ssh agent, the token is
+only for the GitHub API.** Neither one can reach beyond what it needs.
+
+### Git: the ssh agent is forwarded
+
+The host's `$SSH_AUTH_SOCK` is mounted at `/tmp/host-ssh-agent`. The container
+asks the agent **on the host** to sign; the private key never enters the
+container, so there is nothing to leak into a log, a volume or an image layer.
+Clone, fetch and push over ssh just work — no token involved.
+
+Because the agent socket has a random per-session name, `initialize.sh` keeps
+`~/.ssh/devcontainer-agent.sock` pointed at the live one and that fixed path is
+what gets mounted. With no agent running, it drops a placeholder and the
+container simply has no forwarding.
+
+This works the same whether you open the folder in VS Code or run
+`devcontainer up` from the CLI. (VS Code also does its own agent forwarding and
+overrides `SSH_AUTH_SOCK` in the terminals it opens; the mount above is what
+covers `devcontainer exec` and any terminal attached with plain `docker exec`.)
+
+The honest limit: while the container is up, anything in it can *use* the agent
+to sign. What it cannot do is take the key with it.
+
+### `gh`: one token per repository
+
+Nothing is inherited — not `~/.config/gh` (which on a keyring-based host carries
+no token anyway), not `GH_TOKEN`, not `GITHUB_TOKEN`. A host token reaches every
+repository you can; that is exactly what should not be in here.
+
+Instead, run `gh-login` inside the container. It walks you through creating a
+**fine-grained token** limited to the current repository — repo name and a
+paste-ready token name are filled in from `git remote` — then reads it with echo
+off (so it never reaches the shell history) and hands it to
+`gh auth login --with-token`.
+
+Forget to authenticate and `gh` will tell you: the shell wraps it so that a
+command failing *for lack of auth* prints the walkthrough. It runs the real `gh`
+first and only checks on failure, so there is no round-trip on normal use.
+
+There is no `gh auth setup-git`: git is already covered by the agent, and
+registering a credential helper would only add a second, weaker path to the same
+thing. If you deliberately want an https remote to use the token, run that
+command yourself.
+
+The token lands in `~/.config/gh`, a named volume scoped to this project: it
+survives rebuilds, the host's own config is never touched, and it stays out of
+`$HOME` where backups and sync tools would find it. To revoke, delete the token
+on GitHub or `docker volume rm devcontainer-gh-<id>`.
+
+Why a fine-grained token rather than `gh auth login` in the browser: OAuth scopes
+are per *capability*, not per repository — the smallest one that makes `gh` work
+is `repo`, which opens every private repository you have.
+
+## What survives a rebuild
+
+Rebuilding a dev container throws away the container's filesystem: without help,
+every Claude session transcript, every shell command you ran and every package
+you downloaded is gone. The template puts that state in **named volumes scoped to
+the project**, so `devcontainer up --build-no-cache` (or *Rebuild Container* in
+VS Code) is a cheap operation.
+
+| Volume | Mounted at | What you keep |
+|--------|------------|---------------|
+| `devcontainer-claude-<id>` | `~/.claude` | Session transcripts (`claude --resume` / `--continue`), prompt history (`history.jsonl`), file history, plugins |
+| `devcontainer-vscode-server-<id>` | `~/.vscode-server` | Extensions you installed by hand, the VS Code Server binary (~100 MB), editor state |
+| `devcontainer-persist-<id>` | `~/.persist` | Shell history (`HISTFILE` is pointed here by `shell/rc.sh`) |
+| `devcontainer-npm-<id>` | `~/.npm` | npm cache |
+| `devcontainer-pip-<id>` | `~/.cache/pip` | pip cache |
+| `devcontainer-poetry-<id>` | `~/.cache/pypoetry` | Poetry cache **and its virtualenvs** — the project's env, not just the downloads |
+| `devcontainer-pyenv-<id>` | `~/.pyenv/versions` | Pythons compiled with `pyenv install` (minutes each) |
+| `devcontainer-gh-<id>` | `~/.config/gh` | The project's GitHub token (see [GitHub access](#github-access)) |
+| `devcontainer-playwright-browsers` | `~/.cache/ms-playwright` | Chromium — the one **global** volume (see below) |
+
+`<id>` is `${devcontainerId}`, which the tooling derives from the workspace: two
+projects built from this same template get different volumes and never see each
+other's sessions or history.
+
+### Checking it yourself
+
+`.devcontainer/check-persistence.sh` verifies the whole thing end to end. Run it,
+rebuild, run it again — it figures out which run it is:
+
+```bash
+bash .devcontainer/check-persistence.sh   # 1. seeds a marker in every volume
+# rebuild: F1 -> "Dev Containers: Rebuild Container"
+bash .devcontainer/check-persistence.sh   # 2. reports what survived
+```
+
+The second run prints a line per volume (`kept` / `LOST`) and compares real state
+before and after — Claude sessions, VS Code extensions, shell history lines,
+pyenv versions, the `gh` account. It exits non-zero if anything was lost.
+
+Two details make the result trustworthy. It writes a **control file in `$HOME`**,
+which is *not* a volume: if that file is still there on the second run, the
+container was never rebuilt and the script says so instead of reporting a
+meaningless success. And it keeps its state in the workspace (a bind mount that
+always survives) plus a marker in `/tmp` (which dies with the container), so
+running it twice without rebuilding is detected rather than passed.
+
+`--reset` starts over.
+
+Notes and caveats:
+
+- **Playwright is deliberately global.** Chromium is immutable content, not
+  per-project state, so the ~150 MB download is paid once per machine. Scoping it
+  per project would cost bandwidth and buy no isolation.
+- **Moving or renaming the project folder changes `${devcontainerId}`.** The old
+  volumes are not deleted, they just stop being attached — the state looks lost.
+- **`~/.claude.json` is *not* persisted.** It lives in `$HOME` (not in `~/.claude`)
+  and is a file, which cannot be a volume. Nothing important is lost: `postCreate`
+  re-registers the Playwright MCP server and re-applies `hasCompletedOnboarding`
+  on every rebuild, and sessions are read from `~/.claude/projects`.
+- **Shell history needs more than a volume.** A shell only writes its history when
+  it exits, and a rebuild kills the container first — closing the terminal
+  beforehand does not help either. So `rc.sh` flushes every command as it is
+  entered (`history -a` in `PROMPT_COMMAND` for bash, `INC_APPEND_HISTORY` for zsh).
+- **Ownership.** A fresh volume inherits the ownership of the image directory it
+  covers (uid 1000), which is the wrong user when `updateRemoteUserUID` remaps
+  `vscode` to a host UID other than 1000. `setup-persist.sh` runs first in
+  `postCreate` and fixes it.
+- **Cleaning up.** Volumes accumulate as projects come and go:
+
+  ```bash
+  docker volume ls --filter name=devcontainer-
+  docker volume rm devcontainer-claude-<id> …   # or `docker volume prune` for all unused
+  ```
 
 ## Publishing to GHCR
 

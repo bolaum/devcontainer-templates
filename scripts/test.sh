@@ -61,7 +61,20 @@ smoke_one() {
     fi
 
     echo "==> [${id}] cleanup"
-    docker rm -f "$(docker container ls -f "label=${id_label}" -q)" 2>/dev/null || true
+    local cid vols
+    cid="$(docker container ls -f "label=${id_label}" -q)"
+    if [ -n "$cid" ]; then
+        # Templates mount per-project named volumes (Claude state, caches, ...).
+        # Collect them before removing the container — a volume in use cannot be
+        # deleted — so each run exercises volume creation from scratch and the
+        # test leaves nothing behind. The global Playwright volume is shared with
+        # real projects, so it is never touched.
+        vols="$(docker inspect "$cid" \
+            --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' \
+            | grep -v '^devcontainer-playwright-browsers$' || true)"
+        docker rm -f "$cid" >/dev/null
+        [ -n "$vols" ] && printf '%s\n' "$vols" | xargs -r docker volume rm >/dev/null 2>&1 || true
+    fi
     rm -rf "$src_dir"
 }
 

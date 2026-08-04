@@ -4,12 +4,27 @@
         "dockerfile": "Dockerfile",
         "args": {
             "VARIANT": "${templateOption:imageVariant}",
-            "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}"
-        }
+            "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}",
+            "APT_MIRROR": "${templateOption:aptMirror}",
+            "EXTRA_PACKAGES": "${templateOption:extraPackages}"
+        },
+        // Passed straight through to `docker build`. BuildKit's default progress
+        // output truncates each step to ~60 chars, which the cache mounts fill
+        // on their own — every apt layer then looks like `RUN --mount=type=cache,`
+        // and you cannot tell which one is slow. `plain` prints them in full.
+        "options": [
+            "--progress=${templateOption:buildProgress}"
+        ]
     },
     "features": {
         "ghcr.io/devcontainers/features/python:1": {
-            "version": "${templateOption:pythonVersion}"
+            "version": "${templateOption:pythonVersion}",
+            // The feature otherwise pipx-installs flake8, autopep8, black, yapf,
+            // mypy, pydocstyle, pycodestyle, bandit, pipenv, virtualenv, pytest
+            // and pylint — twelve virtualenvs, ~24s of build and ~200 MB, for
+            // tools at whatever version happens to be current. With Poetry these
+            // belong in the project's dev-dependencies, pinned per project.
+            "installTools": false
         },
         "ghcr.io/devcontainers-extra/features/poetry:2": {},
         "ghcr.io/devcontainers/features/node:1": {
@@ -32,10 +47,40 @@
         // the source here and in initialize.sh.
         "source=${localEnv:XDG_RUNTIME_DIR}/pulse/native,target=/tmp/host-pulse,type=bind",
         "source=${localEnv:XDG_RUNTIME_DIR}/wayland-0,target=/tmp/host-wayland,type=bind",
-        // gh config from the host (empty when you authenticate with GH_TOKEN only).
-        "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind",
-        // Named volume shared by every container built from this template, so the
-        // ~150 MB Chromium download happens once and not per project.
+        // SSH agent forwarded from the host: the container can *use* the key to
+        // sign (git push over ssh) but never sees the private key itself. The
+        // socket has a random per-session name, so initialize.sh keeps this fixed
+        // path pointing at the live one.
+        "source=${localEnv:HOME}/.ssh/devcontainer-agent.sock,target=/tmp/host-ssh-agent,type=bind",
+        // Everything below survives a rebuild. ${devcontainerId} is derived from
+        // this workspace, so the volumes are unique per project even when two
+        // projects share the same image — no state leaks between them. Moving or
+        // renaming the project folder changes the id and orphans these volumes.
+        //
+        // Claude's whole state dir: session transcripts (--resume/--continue),
+        // history.jsonl (prompt history), file-history, plugins. The credentials
+        // bind above is nested inside it and still wins (Docker applies the
+        // deepest mount last).
+        "source=devcontainer-claude-${devcontainerId},target=/home/vscode/.claude,type=volume",
+        // Extensions installed by hand during use, the VS Code Server binary
+        // (~100 MB re-downloaded on every rebuild otherwise) and editor state.
+        "source=devcontainer-vscode-server-${devcontainerId},target=/home/vscode/.vscode-server,type=volume",
+        // Shell history: ~/.bash_history and ~/.zsh_history live in $HOME, which
+        // is rebuilt every time, so shell/rc.sh points HISTFILE in here instead.
+        "source=devcontainer-persist-${devcontainerId},target=/home/vscode/.persist,type=volume",
+        // Package manager caches. ~/.cache/pypoetry also holds the virtualenvs,
+        // so the project's env survives a rebuild, not just the downloads.
+        "source=devcontainer-npm-${devcontainerId},target=/home/vscode/.npm,type=volume",
+        "source=devcontainer-pip-${devcontainerId},target=/home/vscode/.cache/pip,type=volume",
+        "source=devcontainer-poetry-${devcontainerId},target=/home/vscode/.cache/pypoetry,type=volume",
+        // Pythons compiled with `pyenv install` (minutes each).
+        "source=devcontainer-pyenv-${devcontainerId},target=/home/vscode/.pyenv/versions,type=volume",
+        // The project's own GitHub token (see `gh-login`). A volume, not a bind
+        // to ~/.config/gh: the host's config is never touched, and the token
+        // stays out of $HOME — where backups, sync tools and greps would find it.
+        "source=devcontainer-gh-${devcontainerId},target=/home/vscode/.config/gh,type=volume",
+        // The one deliberately GLOBAL volume: Chromium is immutable content, not
+        // per-project state, so the ~150 MB download is paid once per machine.
         "source=devcontainer-playwright-browsers,target=/home/vscode/.cache/ms-playwright,type=volume"
     ],
     "containerEnv": {
@@ -48,10 +93,13 @@
         // Wayland clients (a headed Chromium) expect a private runtime dir; the
         // Dockerfile creates it since the container has no logind session.
         "XDG_RUNTIME_DIR": "/tmp/xdg-runtime",
-        // Forwarded so `gh` works when the host authenticates through the env var
-        // instead of ~/.config/gh. Empty is the same as unset for gh.
-        "GH_TOKEN": "${localEnv:GH_TOKEN}",
-        "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+        // Matches the forwarded agent socket mounted above.
+        //
+        // No GH_TOKEN/GITHUB_TOKEN is forwarded on purpose: a host token reaches
+        // every repository you can, and anything running in here could read it.
+        // Authenticate per project instead — `gh-login` walks you through a
+        // fine-grained token scoped to this repository alone.
+        "SSH_AUTH_SOCK": "/tmp/host-ssh-agent"
     },
     "initializeCommand": "bash .devcontainer/initialize.sh",
     "postCreateCommand": "bash .devcontainer/postCreate.sh",

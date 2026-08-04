@@ -1,6 +1,6 @@
 {
     "id": "base",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "name": "Base (Ubuntu + Claude + pyenv/nvm)",
     "description": "Isolated Ubuntu environment to start any project without polluting the host. Python via the official feature + Poetry, pyenv (with build deps) to compile other versions on demand, Node via nvm, GitHub CLI and a CLI toolbox (jq, ripgrep, fd, sqlite3, ffmpeg…). Claude Code comes preinstalled and preconfigured — settings.json, statusline and auth reused from the host — plus microphone, clipboard and a Playwright browser bridged from the host desktop.",
     "documentationURL": "https://github.com/bolaum/devcontainer-templates/tree/main/src/base",
@@ -35,6 +35,35 @@
                 "20"
             ],
             "default": "lts"
+        },
+        "aptMirror": {
+            "type": "string",
+            "description": "Which Ubuntu mirror apt uses. 'auto' benchmarks the official mirrors for your country against the default and switches only if one is clearly faster — worth minutes per uncached build on networks where archive.ubuntu.com is slow. 'keep' leaves the image untouched; you can also pass a country code (e.g. BR, DE) to skip detection, or a full mirror URL.",
+            "proposals": [
+                "auto",
+                "keep"
+            ],
+            "default": "auto"
+        },
+        "extraPackages": {
+            "type": "string",
+            "description": "Extra apt packages for this project, space-separated. The image ships only tools useful in any project (jq, ripgrep, fd, tree, less, zip); anything project-specific goes here — e.g. 'sqlite3 postgresql-client' for database work, 'ffmpeg imagemagick' for media, 'shellcheck shfmt' for shell. Installed in the last layer of the Dockerfile, so changing it leaves every other layer cached.",
+            "proposals": [
+                "",
+                "sqlite3 postgresql-client",
+                "shellcheck shfmt",
+                "ffmpeg imagemagick"
+            ],
+            "default": ""
+        },
+        "buildProgress": {
+            "type": "string",
+            "description": "Docker build output. 'plain' prints every step in full, so you can tell which layer is slow; the compact 'auto' view truncates them all to the same 'RUN --mount=type=cache,' and hides that. Set it to 'auto' if you prefer the quieter output.",
+            "proposals": [
+                "plain",
+                "auto"
+            ],
+            "default": "plain"
         },
         "installPlaywright": {
             "type": "boolean",

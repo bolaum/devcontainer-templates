@@ -8,6 +8,9 @@
 # instead of frozen at image build time.
 set -euo pipefail
 
-sudo apt-get update -qq
+# -q, not -qq: this is the slowest step of postCreate when the mirrors are slow,
+# and -qq prints nothing at all, so it looks like the container is hung.
+echo "⏳ Refreshing apt package lists (slow mirrors can make this take a while)..."
+sudo apt-get update -q
 
 echo "✅ apt package lists refreshed (sudo apt install <pkg> works without apt update)"

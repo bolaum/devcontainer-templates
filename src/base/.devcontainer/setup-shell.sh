@@ -13,6 +13,10 @@ for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     {
         echo ''
         echo '# dev-container shell rc'
+        # Exported here rather than derived inside rc.sh: locating your own path
+        # from a sourced file differs between bash and zsh, and rc.sh is sourced
+        # by both.
+        echo "export _DEVCONTAINER_SHELL_DIR=\"$SCRIPT_DIR/shell\""
         echo "[ -f \"$RC_FILE\" ] && . \"$RC_FILE\""
     } >> "$rc"
 done

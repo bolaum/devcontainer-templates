@@ -40,14 +40,24 @@ if [ -z "$mcp_playwright_version" ]; then
     mcp_playwright_version="latest"
 fi
 
+echo "⏳ Installing playwright@$mcp_playwright_version and @playwright/mcp (npm)..."
 npm install -g "playwright@$mcp_playwright_version" @playwright/mcp@latest
 
-# Chromium's system libraries are already baked into the image (see Dockerfile);
-# this is a cheap no-op that self-heals if Playwright ever adds a dependency.
-playwright install-deps chromium
-
-# The browser itself, cached in the shared volume.
+# The browser itself, cached in the shared volume — already there on every
+# container after the first one on this machine.
+echo "⏳ Fetching Chromium (cached in the shared volume after the first time)..."
 playwright install chromium
+
+# Chromium's system libraries are already baked into the image (see Dockerfile).
+# `playwright install-deps` would confirm that, but it runs a full `apt-get
+# update` first — the slowest step of postCreate, paid on every container even
+# though it almost never has anything to do. Ask the binary instead, and only
+# self-heal when a library really is missing.
+chrome_bin="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -print -quit 2>/dev/null)"
+if [ -n "$chrome_bin" ] && ldd "$chrome_bin" 2>/dev/null | grep -q 'not found'; then
+    echo "⏳ Chromium is missing system libraries, installing them..."
+    playwright install-deps chromium
+fi
 
 # Fail here, at create time, rather than at Claude's first navigation: resolve
 # playwright-core the way the MCP server does and check that the Chromium build

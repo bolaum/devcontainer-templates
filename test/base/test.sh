@@ -52,13 +52,27 @@ check "jq" bash -lic "jq --version"
 check "ripgrep" bash -lic "rg --version"
 check "fd" bash -lic "fd --version"
 check "tree" bash -lic "tree --version"
+check "ffmpeg" bash -lic "ffmpeg -version"
+check "imagemagick" bash -lic "convert --version"
+# Installed by the "extra tools" layer, the last one in the Dockerfile.
 check "sqlite3" bash -lic "sqlite3 --version"
 check "psql" bash -lic "psql --version"
 check "shellcheck" bash -lic "shellcheck --version"
 check "shfmt" bash -lic "shfmt --version"
-check "ffmpeg" bash -lic "ffmpeg -version"
-check "imagemagick" bash -lic "convert --version"
-check "gh" bash -lic "gh --version"
+check "fzf" bash -lic "fzf --version"
+# fzf takes over Ctrl+R for fuzzy history search — wired in shell/rc.sh, which
+# has to cope with the integration script having moved between fzf releases.
+# -X lists bindings to shell commands (what fzf 0.44 uses), -p the macro ones.
+check "fzf bound to Ctrl+R" bash -lic 'bind -X 2>/dev/null | grep -q fzf || bind -p 2>/dev/null | grep -q fzf'
+check "gh" bash -lic "command gh --version"
+
+# GitHub auth: the container holds no host credential. The key signs on the host
+# through the forwarded agent, and `gh` gets a per-repo token via `gh-login`.
+check "ssh agent forwarded" bash -c '[ "$SSH_AUTH_SOCK" = "/tmp/host-ssh-agent" ] && [ -e "$SSH_AUTH_SOCK" ]'
+# A host token would reach every repo the user can — nothing should inherit one.
+check "no host GitHub token" bash -lic '[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]'
+check "gh-login available" bash -lic "type gh-login"
+check "gh nudges when logged out" bash -lic "gh auth status 2>&1 | grep -q 'gh-login'"
 
 # Playwright (installPlaywright defaults to true)
 check "playwright cli" bash -lic "playwright --version"
@@ -81,6 +95,42 @@ check "MCP browser revision present" bash -lic 'node -e "const {createRequire}=r
 # Shell customization
 check "shell rc wired" bash -c 'grep -q shell/rc.sh "$HOME/.bashrc"'
 check "alias from rc.sh" bash -lic "alias ll"
+
+# Persistence across rebuilds. Each of these is a named volume scoped to the
+# project via ${devcontainerId}, so the state behind it outlives the container.
+# A plain directory here means the mount silently did not happen and everything
+# in it is lost on the next rebuild.
+check "claude state persisted" mountpoint -q "$HOME/.claude"
+check "vscode-server persisted" mountpoint -q "$HOME/.vscode-server"
+check "shell history persisted" mountpoint -q "$HOME/.persist"
+check "npm cache persisted" mountpoint -q "$HOME/.npm"
+check "pip cache persisted" mountpoint -q "$HOME/.cache/pip"
+check "poetry cache persisted" mountpoint -q "$HOME/.cache/pypoetry"
+check "pyenv versions persisted" mountpoint -q "$HOME/.pyenv/versions"
+check "gh config persisted" mountpoint -q "$HOME/.config/gh"
+check "playwright browsers persisted" mountpoint -q "$HOME/.cache/ms-playwright"
+# A fresh volume takes the image directory's ownership (uid 1000), which is the
+# wrong user whenever updateRemoteUserUID remaps vscode to a host UID != 1000.
+check "persisted dirs writable" bash -c '
+    for d in "$HOME/.claude" "$HOME/.config/gh" "$HOME/.vscode-server" "$HOME/.persist" \
+             "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/pypoetry" \
+             "$HOME/.cache/ms-playwright" "$HOME/.pyenv/versions"; do
+        [ -w "$d" ] || { echo "not writable: $d"; exit 1; }
+    done'
+# Bash keeps history in $HOME by default, which is rebuilt every time.
+check "HISTFILE in persisted volume" bash -lic '[ "$HISTFILE" = "$HOME/.persist/bash_history" ]'
+# Pointing HISTFILE at the volume is not enough: a shell only writes its history
+# when it exits, and a rebuild kills it first. Run a command in a real
+# interactive shell (script provides the pty) and look for it in the file while
+# that shell is STILL RUNNING — which only holds if each command is flushed as
+# it is entered.
+check "history flushed on every command" bash -c '
+    marker="hist-marker-$$"
+    printf "echo %s\nsleep 6\n" "$marker" | script -qc "bash -i" /dev/null >/dev/null 2>&1 &
+    sleep 3
+    grep -q "$marker" "$HOME/.persist/bash_history"'
+# The end-to-end checker ships with the template (cwd here is <workspace>/test-project).
+check "persistence checker present" bash -c 'test -x "$(dirname "$PWD")/.devcontainer/check-persistence.sh"'
 
 # Report results
 reportResults
