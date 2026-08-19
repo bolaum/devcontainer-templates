@@ -57,7 +57,7 @@ container was not actually rebuilt and the rest of the report means nothing.
 Without a rebuild you can still confirm the mounts are in place:
 
 ```bash
-for d in ~/.claude ~/.codex ~/.config/gh ~/.vscode-server ~/.persist ~/.npm \
+for d in ~/.claude ~/.codex ~/.ssh ~/.config/gh ~/.vscode-server ~/.persist ~/.npm \
          ~/.cache/pip ~/.cache/pypoetry ~/.cache/ms-playwright ~/.pyenv/versions; do
     mountpoint -q "$d" && [ -w "$d" ] && echo "ok    $d" || echo "FAIL  $d"
 done
@@ -116,11 +116,26 @@ gh auth status
 ```
 
 `ssh -T` succeeds when the reply says "successfully authenticated". The
-`accept-new` is needed because `~/.ssh` is not a persisted volume: `known_hosts`
-is empty in every fresh container, and without it the check fails with "Host key
-verification failed" — a container problem, not an auth problem. It trusts the key
-on first use, which is the usual trade for a throwaway container; drop the flag and
-seed `known_hosts` yourself if you would rather not.
+`accept-new` is there because `known_hosts` may not be populated yet, and what
+populates it depends on how the container was started — measured, not assumed:
+
+- **plain `devcontainer up`**: nothing creates `~/.ssh/known_hosts` at all, so
+  without the flag the check fails with "Host key verification failed" every time;
+- **VS Code**: the Dev Containers extension copies the *host's* whole file in
+  shortly after start (here, byte-identical, ~0.4 s in), and only when it is
+  absent. Run the checklist inside that window and you get the same failure;
+- the file is in neither case part of the image.
+
+Either way it is a timing or transport problem, not an auth problem, and
+`accept-new` trusts the key on first use. `~/.ssh` is a persisted volume and the
+extension only copies when the file is absent, so once accepted it stays accepted
+across rebuilds. Drop the flag and seed `known_hosts`
+yourself if you would rather not trust on first use.
+
+A side effect worth being aware of rather than alarmed by: on the VS Code path
+your host's entire SSH history — every host in `known_hosts`, hashed or not — ends
+up inside the container. No private key crosses; the agent still signs on the
+host.
 
 A host token being present is a **failure**, not a convenience: it would reach
 every repository the user can. If `gh` is logged out, that is expected on a fresh

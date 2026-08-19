@@ -386,6 +386,28 @@ Because the agent socket has a random per-session name, `initialize.sh` keeps
 what gets mounted. With no agent running, it drops a placeholder and the
 container simply has no forwarding.
 
+`~/.ssh` inside the container is a persisted volume, so `known_hosts`, an ssh
+config and any key you deliberately generate in there survive a rebuild. None of
+that changes where *your* key lives: it stays on the host, and the agent is still
+what signs.
+
+One thing worth knowing, because it is not obvious and nothing announces it: on
+the **VS Code** path the Dev Containers extension copies the host's entire
+`~/.ssh/known_hosts` into the container shortly after it starts — measured here as
+a byte-identical copy, hundreds of hosts, arriving about 0.4 s in. No private key
+crosses over, but your SSH *history* — every host you have connected to, hashed or
+not — does. If that matters for a project, delete the file inside the container;
+it will not come back (see below).
+
+It copies **only when the file is absent**. The extension's helper tests
+`[ -e '<dest>' ] && exit 1` before writing, so now that `~/.ssh` is a persisted
+volume the host's file is snapshotted **once**, on the container's first start,
+and left alone from then on. Two consequences: a host key you accept inside the
+container stays accepted across rebuilds, and hosts you add on the *host* after
+that first copy never appear in the container. On the plain `devcontainer up` path
+nothing creates the file at all, which is why the checklist passes
+`-o StrictHostKeyChecking=accept-new`.
+
 This works the same whether you open the folder in VS Code or run
 `devcontainer up` from the CLI. (VS Code also does its own agent forwarding and
 overrides `SSH_AUTH_SOCK` in the terminals it opens; the mount above is what
@@ -443,6 +465,7 @@ VS Code) is a cheap operation.
 | `devcontainer-pyenv-<id>` | `~/.pyenv/versions` | Pythons compiled with `pyenv install` (minutes each) |
 | `devcontainer-gh-<id>` | `~/.config/gh` | The project's GitHub token (see [GitHub access](#github-access)) |
 | `devcontainer-codex-<id>` | `~/.codex` | The Codex login, when `installCodex` is on (mounted either way) |
+| `devcontainer-ssh-<id>` | `~/.ssh` | `known_hosts`, an ssh config, and any key you generate inside the container |
 | `devcontainer-playwright-browsers` | `~/.cache/ms-playwright` | Chromium — the one **global** volume (see below) |
 
 `<id>` is `${devcontainerId}`, which the tooling derives from the workspace: two

@@ -143,6 +143,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN mkdir -p \
         /home/vscode/.claude \
         /home/vscode/.codex \
+        /home/vscode/.ssh \
         /home/vscode/.config/gh \
         /home/vscode/.vscode-server \
         /home/vscode/.persist \
@@ -153,11 +154,15 @@ RUN mkdir -p \
     && chown -R vscode:vscode \
         /home/vscode/.claude \
         /home/vscode/.codex \
+        /home/vscode/.ssh \
         /home/vscode/.config \
         /home/vscode/.vscode-server \
         /home/vscode/.persist \
         /home/vscode/.npm \
-        /home/vscode/.cache
+        /home/vscode/.cache \
+    # ssh refuses to use a key whose directory is group- or world-readable, and a
+    # fresh volume inherits this directory's mode.
+    && chmod 700 /home/vscode/.ssh
 
 # XDG_RUNTIME_DIR for the container (see devcontainer.json): a headed Chromium
 # talking to the host's Wayland compositor expects one, and there is no logind

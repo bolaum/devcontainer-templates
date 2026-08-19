@@ -5,3 +5,4 @@ devcontainer-collection.json
 # OS / editor
 .DS_Store
 *.swp
+tmp/

@@ -126,11 +126,15 @@ check "poetry cache persisted" mountpoint -q "$HOME/.cache/pypoetry"
 check "pyenv versions persisted" mountpoint -q "$HOME/.pyenv/versions"
 check "gh config persisted" mountpoint -q "$HOME/.config/gh"
 check "codex login persisted" mountpoint -q "$HOME/.codex"
+check "ssh dir persisted" mountpoint -q "$HOME/.ssh"
+# ssh refuses a key whose directory is group- or world-readable, and the mode
+# of a fresh volume comes from Docker, not from the image directory.
+check "ssh dir is 0700" bash -c '[ "$(stat -c %a "$HOME/.ssh")" = "700" ]'
 check "playwright browsers persisted" mountpoint -q "$HOME/.cache/ms-playwright"
 # A fresh volume takes the image directory's ownership (uid 1000), which is the
 # wrong user whenever updateRemoteUserUID remaps vscode to a host UID != 1000.
 check "persisted dirs writable" bash -c '
-    for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.config/gh" "$HOME/.vscode-server" "$HOME/.persist" \
+    for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.ssh" "$HOME/.config/gh" "$HOME/.vscode-server" "$HOME/.persist" \
              "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/pypoetry" \
              "$HOME/.cache/ms-playwright" "$HOME/.pyenv/versions"; do
         [ -w "$d" ] || { echo "not writable: $d"; exit 1; }

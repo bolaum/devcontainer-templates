@@ -35,6 +35,7 @@ TARGETS=(
     "$HOME/.claude|Claude sessions, prompt history, file history"
     "$HOME/.config/gh|GitHub token for this repo"
     "$HOME/.codex|Codex login, when installCodex is on"
+    "$HOME/.ssh|known_hosts, ssh config, keys made in here"
     "$HOME/.vscode-server|VS Code extensions and server binary"
     "$HOME/.persist|Shell history"
     "$HOME/.npm|npm cache"

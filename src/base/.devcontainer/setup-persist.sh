@@ -15,6 +15,7 @@ set -euo pipefail
 PERSISTED_DIRS=(
     "$HOME/.claude"
     "$HOME/.codex"
+    "$HOME/.ssh"
     "$HOME/.config/gh"
     "$HOME/.vscode-server"
     "$HOME/.persist"
@@ -42,6 +43,10 @@ for dir in "${PERSISTED_DIRS[@]}"; do
     sudo chown -R "$(id -u):$(id -g)" "$dir"
     fixed=$((fixed + 1))
 done
+
+# ssh refuses to use a key whose directory is group- or world-readable, and the
+# mode of a fresh volume is whatever Docker gave it rather than the image's.
+[ -d "$HOME/.ssh" ] && chmod 700 "$HOME/.ssh"
 
 if [ "$fixed" -gt 0 ]; then
     echo "✅ Persisted volumes: ownership fixed on $fixed director$([ "$fixed" -eq 1 ] && echo y || echo ies)."

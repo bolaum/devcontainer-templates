@@ -139,6 +139,22 @@
         // to ~/.config/gh: the host's config is never touched, and the token
         // stays out of $HOME — where backups, sync tools and greps would find it.
         "source=devcontainer-gh-${devcontainerId},target=/home/vscode/.config/gh,type=volume",
+        // ~/.ssh. Nothing here changes how *your* key is used — that still
+        // happens on the host, through the forwarded agent above, and the private
+        // key still never enters the container. This volume is for what the
+        // container itself accumulates: known_hosts, an ssh config, and any key
+        // you deliberately generate in here (a deploy key for one service, say).
+        // Without it all of that is rebuilt from nothing every time.
+        //
+        // known_hosts is worth knowing about: on the VS Code path the extension
+        // copies the HOST's file in wholesale, moments after the container starts
+        // — measured here as a byte-identical copy of ~/.ssh/known_hosts, hundreds
+        // of hosts, arriving ~0.4s in — but only when the file is ABSENT (the
+        // extension tests `[ -e '<dest>' ] && exit 1` first). With this volume in
+        // place the host file is therefore snapshotted once and never refreshed,
+        // and what you change in here sticks. It is not in the image, and on the
+        // plain `devcontainer up` path nothing creates it at all.
+        "source=devcontainer-ssh-${devcontainerId},target=/home/vscode/.ssh,type=volume",
         // The Codex CLI's credentials (installCodex). Mounted even when the CLI
         // is not installed — an empty volume costs nothing, and a mount cannot be
         // made conditional anyway. A volume rather than a bind to the host's

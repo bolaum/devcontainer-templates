@@ -1,6 +1,6 @@
 {
     "id": "base",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "name": "Base (Ubuntu + Claude + pyenv/nvm)",
     "description": "Isolated Ubuntu environment to start any project without polluting the host. Python via the official feature + Poetry, pyenv (with build deps) to compile other versions on demand, Node via nvm, GitHub CLI and a CLI toolbox (jq, ripgrep, fd, sqlite3, ffmpeg…). Claude Code comes preinstalled and preconfigured — settings.json, statusline and auth reused from the host — plus microphone, clipboard and a Playwright browser bridged from the host desktop.",
     "documentationURL": "https://github.com/bolaum/devcontainer-templates/tree/main/src/base",

@@ -75,8 +75,20 @@ Each template's `.devcontainer/` sets up Claude the same way:
   file-history), `~/.vscode-server` (hand-installed extensions + server binary),
   `~/.persist` (shell history, via `HISTFILE` in `shell/rc.sh`), `~/.npm`,
   `~/.cache/pip`, `~/.cache/pypoetry` (holds the virtualenvs too),
-  `~/.pyenv/versions`, `~/.config/gh` and `~/.codex` (the Codex login, mounted
-  whether or not `installCodex` is on — a mount cannot be conditional). `~/.cache/ms-playwright` is the **one
+  `~/.pyenv/versions`, `~/.config/gh`, `~/.codex` (the Codex login, mounted
+  whether or not `installCodex` is on — a mount cannot be conditional) and
+  `~/.ssh` (`known_hosts`, ssh config, keys made in the container; `chmod 700` in
+  both the `Dockerfile` and `setup-persist.sh`, since ssh refuses a key whose
+  directory is group-readable and a fresh volume's mode comes from Docker).
+  Persisting `~/.ssh` does not change the key story — the private key still never
+  enters the container, the forwarded agent still signs. Worth knowing and
+  documented in the README: on the **VS Code** path the extension copies the
+  copies the host's whole `known_hosts` in ~0.4 s after start (measured:
+  byte-identical, hundreds of hosts) — but **only when the file is absent**: the
+  extension's copy helper runs `[ -e '<dest>' ] && exit 1` first, so with `~/.ssh`
+  persisted the host file is snapshotted once and never refreshed, and edits made
+  in the container stick. It is not in the image, and the plain `devcontainer up`
+  path creates nothing. `~/.cache/ms-playwright` is the **one
   global** volume on purpose: Chromium is immutable content, not per-project state.
   Two consequences to keep in mind when touching this: the mount points must be
   created and `chown`ed in the `Dockerfile` (a fresh volume inherits the image
