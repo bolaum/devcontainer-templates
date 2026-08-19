@@ -10,8 +10,10 @@
 #   3. second run   reports what survived and what did not
 #
 # Telling the runs apart needs two markers with different lifetimes:
-#   - the state file lives in the workspace, a bind mount that survives
-#     everything, so the script knows a seed happened at all;
+#   - the state file lives next to this script, i.e. in the workspace, which is
+#     a bind mount and survives everything, so the script knows a seed happened
+#     at all (in .devcontainer/ rather than the workspace root so it does not
+#     litter the project; the .gitignore next to it keeps it out of git);
 #   - a session marker lives in /tmp, which belongs to the container, so its
 #     absence is what proves the container was really replaced.
 # Without the second one, running twice without rebuilding would cheerfully
@@ -21,7 +23,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE="$SCRIPT_DIR/../.persistence-check.state"
+STATE="$SCRIPT_DIR/.persistence-check.state"
 SESSION="/tmp/.persistence-check-session"
 MARKER_NAME=".persistence-check"
 # Written to $HOME, which is NOT a volume: it must disappear. Without this
@@ -32,6 +34,7 @@ CONTROL="$HOME/.persistence-check-control"
 TARGETS=(
     "$HOME/.claude|Claude sessions, prompt history, file history"
     "$HOME/.config/gh|GitHub token for this repo"
+    "$HOME/.codex|Codex login, when installCodex is on"
     "$HOME/.vscode-server|VS Code extensions and server binary"
     "$HOME/.persist|Shell history"
     "$HOME/.npm|npm cache"

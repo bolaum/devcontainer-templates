@@ -3,7 +3,6 @@
     "build": {
         "dockerfile": "Dockerfile",
         "args": {
-            "VARIANT": "${templateOption:imageVariant}",
             "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}",
             "APT_MIRROR": "${templateOption:aptMirror}",
             "EXTRA_PACKAGES": "${templateOption:extraPackages}"
@@ -31,7 +30,55 @@
             "version": "${templateOption:nodeVersion}",
             "pnpmVersion": "none"
         },
-        "ghcr.io/devcontainers/features/github-cli:1": {}
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        // A Docker daemon INSIDE this container (option `installDocker`), so a
+        // project's own compose.yaml is built and run from in here.
+        //
+        // The option substitutes the feature's ID, which looks odd until you see
+        // why: the Template spec only replaces strings, it cannot add or remove a
+        // features entry, and the docker-in-docker feature has no off switch of
+        // its own — `version: "none"` still applies its static metadata
+        // (privileged, entrypoint, volumes). So "off" needs *some* id to put here
+        // instead, and that is what ./features/no-docker is: a local feature that
+        // installs nothing.
+        //
+        // Off by default because it makes the container `privileged`, which the
+        // feature requires and does not let you turn off.
+        //
+        // NOT the host socket (docker-outside-of-docker). Two reasons, and the
+        // second is the practical one: handing over /var/run/docker.sock is root
+        // on the host, and bind-mount paths in a sibling container would resolve
+        // against the HOST filesystem, so `./db/data` in a compose.yaml would
+        // silently point at nothing.
+        //
+        // When on, the feature's defaults bring moby, buildx, compose v2,
+        // DOCKER_BUILDKIT=1, the docker-init.sh entrypoint that starts the daemon,
+        // `privileged: true`, and two volumes named per workspace like the ones
+        // below:
+        //
+        //     dind-var-lib-docker-${devcontainerId}      -> /var/lib/docker
+        //     dind-var-lib-containerd-${devcontainerId}  -> /var/lib/containerd
+        //
+        // They hold the nested daemon's images, containers and volumes, so a
+        // rebuild keeps them. Renaming or moving the project folder changes the id
+        // and orphans them, same as the rest.
+        //
+        // VS Code underlines the line below with "Failed to parse feature
+        // identifier" — expected, and not worth chasing. The Dev Containers
+        // extension validates every key of `features` as a real feature ID, and
+        // here it is a placeholder; this file is template SOURCE and is never
+        // consumed as-is. After `apply` the key holds a real ID. The extension
+        // contributes no setting to turn that validation off.
+        //
+        // `moby: false` is required on Ubuntu 26.04: the feature defaults to the
+        // Moby packages, which are not built for 'resolute', and it refuses to
+        // install rather than fall back ("the 'moby' option is not supported on
+        // ubuntu 'resolute'"). false takes Docker CE from Docker's own repo
+        // instead. The placeholder feature declares the same option and ignores
+        // it, since this object is shared by both.
+        "${templateOption:installDocker}": {
+            "moby": false
+        }
     },
     "customizations": {
         "vscode": {
@@ -42,16 +89,30 @@
     },
     "mounts": [
         "source=${localEnv:HOME}/.claude/.credentials.json,target=/home/vscode/.claude/.credentials.json,type=bind",
+        // THE THREE SOCKETS BELOW LAND IN /run, NOT /tmp, AND THAT IS
+        // LOAD-BEARING. /tmp is fair game for anything that runs before you: the
+        // docker-in-docker feature's entrypoint, for one, does
+        //
+        //     if ! mountpoint -q /tmp; then mount -t tmpfs none /tmp; fi
+        //
+        // on every container START. Docker has long since bound these sockets
+        // there, so the tmpfs goes on TOP and hides them. Nothing reports an
+        // error — `docker inspect` still lists the mounts and /proc/mounts still
+        // shows them, they are simply shadowed by an empty filesystem. What you
+        // get instead is a silent microphone, Chromium exiting with "Failed to
+        // connect to Wayland display", and `git push` failing because the agent
+        // socket is somehow not there. /run is where sockets belong anyway.
+        //
         // Microphone (/voice) and clipboard image paste, bridged from the host
         // desktop. Linux only; on a Wayland session other than wayland-0, change
         // the source here and in initialize.sh.
-        "source=${localEnv:XDG_RUNTIME_DIR}/pulse/native,target=/tmp/host-pulse,type=bind",
-        "source=${localEnv:XDG_RUNTIME_DIR}/wayland-0,target=/tmp/host-wayland,type=bind",
+        "source=${localEnv:XDG_RUNTIME_DIR}/pulse/native,target=/run/host-pulse,type=bind",
+        "source=${localEnv:XDG_RUNTIME_DIR}/wayland-0,target=/run/host-wayland,type=bind",
         // SSH agent forwarded from the host: the container can *use* the key to
         // sign (git push over ssh) but never sees the private key itself. The
         // socket has a random per-session name, so initialize.sh keeps this fixed
         // path pointing at the live one.
-        "source=${localEnv:HOME}/.ssh/devcontainer-agent.sock,target=/tmp/host-ssh-agent,type=bind",
+        "source=${localEnv:HOME}/.ssh/devcontainer-agent.sock,target=/run/host-ssh-agent,type=bind",
         // Everything below survives a rebuild. ${devcontainerId} is derived from
         // this workspace, so the volumes are unique per project even when two
         // projects share the same image — no state leaks between them. Moving or
@@ -79,27 +140,50 @@
         // to ~/.config/gh: the host's config is never touched, and the token
         // stays out of $HOME — where backups, sync tools and greps would find it.
         "source=devcontainer-gh-${devcontainerId},target=/home/vscode/.config/gh,type=volume",
+        // The Codex CLI's credentials (installCodex). Mounted even when the CLI
+        // is not installed — an empty volume costs nothing, and a mount cannot be
+        // made conditional anyway. A volume rather than a bind to the host's
+        // ~/.codex, for the same reason as gh above: the host's own login is
+        // never touched, and `codex login` is an interactive browser round trip
+        // that a rebuild must not ask for twice.
+        "source=devcontainer-codex-${devcontainerId},target=/home/vscode/.codex,type=volume",
         // The one deliberately GLOBAL volume: Chromium is immutable content, not
         // per-project state, so the ~150 MB download is paid once per machine.
         "source=devcontainer-playwright-browsers,target=/home/vscode/.cache/ms-playwright,type=volume"
     ],
+    // Reap zombies. Nothing here needs it today, but anything that starts a
+    // background daemon does — the docker-in-docker feature above puts dockerd
+    // and containerd in the background, and without an init as PID 1 their dead
+    // children have no one to wait on them. Costs one tiny process.
+    "init": true,
     "containerEnv": {
-        "PULSE_SERVER": "unix:/tmp/host-pulse",
+        "PULSE_SERVER": "unix:/run/host-pulse",
         // An absolute WAYLAND_DISPLAY is used as-is, so the socket does not have
         // to sit in the container's XDG_RUNTIME_DIR.
-        "WAYLAND_DISPLAY": "/tmp/host-wayland",
+        "WAYLAND_DISPLAY": "/run/host-wayland",
         "INSTALL_PLAYWRIGHT": "${templateOption:installPlaywright}",
         "PLAYWRIGHT_HEADLESS": "${templateOption:playwrightHeadless}",
+        "INSTALL_CODEX": "${templateOption:installCodex}",
         // Wayland clients (a headed Chromium) expect a private runtime dir; the
-        // Dockerfile creates it since the container has no logind session.
-        "XDG_RUNTIME_DIR": "/tmp/xdg-runtime",
+        // Dockerfile creates it since the container has no logind session. In
+        // /run for the same reason as the sockets above.
+        "XDG_RUNTIME_DIR": "/run/xdg-runtime",
+        // The docker CLI's own config dir, deliberately NOT ~/.docker. VS Code
+        // writes a `credsStore` in there pointing at a credential helper that
+        // proxies to the host, and that helper fails in this container ("error
+        // getting credentials - err: exit status 255"), which breaks every
+        // `docker pull` — including anonymous ones. Our own directory has no
+        // credsStore, so the CLI pulls public images with no credential at all,
+        // which is also the policy this container follows everywhere else.
+        // Harmless when the docker feature is off; it just stays empty.
+        "DOCKER_CONFIG": "/home/vscode/.docker-cli",
         // Matches the forwarded agent socket mounted above.
         //
         // No GH_TOKEN/GITHUB_TOKEN is forwarded on purpose: a host token reaches
         // every repository you can, and anything running in here could read it.
         // Authenticate per project instead — `gh-login` walks you through a
         // fine-grained token scoped to this repository alone.
-        "SSH_AUTH_SOCK": "/tmp/host-ssh-agent"
+        "SSH_AUTH_SOCK": "/run/host-ssh-agent"
     },
     "initializeCommand": "bash .devcontainer/initialize.sh",
     "postCreateCommand": "bash .devcontainer/postCreate.sh",

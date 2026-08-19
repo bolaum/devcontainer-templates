@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Claude Code status line.
 
-Renders two progress bars from the status-line stdin JSON:
+Renders three progress bars from the status-line stdin JSON:
   - ctx: context window used  (context_window.*)
   - 5h:  rolling 5-hour rate-limit quota used, with reset countdown
          (rate_limits.five_hour.*)
+  - 7d:  weekly quota across all models — the "Current week (all models)"
+         bar in /usage — with reset countdown (rate_limits.seven_day.*)
 
-Both numbers come straight from Claude Code — the 5h bar is the actual quota
-consumed (not elapsed time), and its countdown is derived from `resets_at`.
+All numbers come straight from Claude Code — the quota bars are the actual
+credit consumed (not elapsed time), and their countdowns derive from
+`resets_at`. The rate-limit block is absent for non-subscribers and until the
+first API response of a session, in which case those bars are omitted.
 """
 import json
 import sys
@@ -48,9 +52,25 @@ def context_fraction(data):
 
 
 def fmt_countdown(secs):
+    """Coarse countdown: days once the window is longer than a day."""
     secs = max(0, int(secs))
-    h, m = secs // 3600, (secs % 3600) // 60
+    d, h, m = secs // 86400, (secs % 86400) // 3600, (secs % 3600) // 60
+    if d:
+        return f"{d}d{h:02d}h"
     return f"{h}h{m:02d}m" if h else f"{m}m"
+
+
+def quota_bar(limits, key, label):
+    """One rate-limit bar, or None when Claude Code did not report that window."""
+    window = limits.get(key) or {}
+    if not window:
+        return None
+    pct = (window.get("used_percentage") or 0) / 100.0
+    suffix = ""
+    resets_at = window.get("resets_at")
+    if resets_at:
+        suffix = f" {DIM}({fmt_countdown(resets_at - time.time())} left){RESET}"
+    return bar(pct, label, suffix)
 
 
 def main():
@@ -64,14 +84,11 @@ def main():
 
     parts = [f"\033[1m{model_name}{RESET}", bar(context_fraction(data), "ctx")]
 
-    five = (data.get("rate_limits") or {}).get("five_hour") or {}
-    if five:
-        pct = (five.get("used_percentage") or 0) / 100.0
-        suffix = ""
-        resets_at = five.get("resets_at")
-        if resets_at:
-            suffix = f" {DIM}({fmt_countdown(resets_at - time.time())} left){RESET}"
-        parts.append(bar(pct, "5h", suffix))
+    limits = data.get("rate_limits") or {}
+    for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
+        rendered = quota_bar(limits, key, label)
+        if rendered:
+            parts.append(rendered)
 
     cost = (data.get("cost") or {}).get("total_cost_usd")
     if cost:

@@ -28,10 +28,20 @@ smoke_one() {
     cp -R "src/${id}" "$src_dir"
 
     # Substitute ${templateOption:x} with each option's default (mimics `apply`).
+    # TEMPLATE_OPTIONS overrides them, space-separated `name=value` — the only way
+    # to exercise an option whose default is off:
+    #
+    #   TEMPLATE_OPTIONS='installDocker=ghcr.io/devcontainers/features/docker-in-docker:2' \
+    #       bash scripts/test.sh base
     if [ "$(jq -r '.options // empty' "$src_dir/devcontainer-template.json")" != "" ]; then
         while IFS= read -r opt; do
-            local val esc
+            local val esc override
             val="$(jq -r ".options.${opt}.default" "$src_dir/devcontainer-template.json")"
+            for override in ${TEMPLATE_OPTIONS:-}; do
+                case "$override" in
+                    "${opt}="*) val="${override#*=}" ;;
+                esac
+            done
             esc="$(printf '%s' "$val" | sed -e 's/[]\/$*.^[]/\\&/g')"
             find "$src_dir" -type f -print0 \
                 | xargs -0 sed -i "s/\${templateOption:${opt}}/${esc}/g"
@@ -73,7 +83,12 @@ smoke_one() {
             --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' \
             | grep -v '^devcontainer-playwright-browsers$' || true)"
         docker rm -f "$cid" >/dev/null
-        [ -n "$vols" ] && printf '%s\n' "$vols" | xargs -r docker volume rm >/dev/null 2>&1 || true
+        # Reported rather than swallowed: a volume that refuses to go (the
+        # docker-in-docker ones can still be busy right after the container dies)
+        # would otherwise pile up unnoticed, one per run.
+        for vol in $vols; do
+            docker volume rm "$vol" >/dev/null 2>&1 || echo "    left behind: $vol"
+        done
     fi
     rm -rf "$src_dir"
 }

@@ -37,7 +37,9 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 
 ### What's inside
 
-- **Base image:** `mcr.microsoft.com/devcontainers/base:ubuntu-24.04` (option `imageVariant`).
+- **Base image:** `mcr.microsoft.com/devcontainers/base:ubuntu26.04`, pinned to the
+  current Ubuntu LTS rather than offered as an option — the layers install packages
+  that release has, so an older base would fail the build rather than degrade.
 - **Python:** official `devcontainers/features/python` feature (option `pythonVersion`, default `os-provided`).
 - **Poetry:** `devcontainers-extra/features/poetry` feature (installs after Python).
 - **pyenv:** installed with the required build dependencies (via the `Dockerfile`)
@@ -63,8 +65,9 @@ hacking on anything, with version managers so bumping runtimes is trivial.
   to the current repository, and `git push` over ssh uses the forwarded agent.
   See [GitHub access](#github-access).
 - **Command-line toolbox:** `jq`, `ripgrep` (`rg`), `fd`, `tree`, `unzip`/`zip`,
-  `less`, `ffmpeg`, `imagemagick` in the base layer; `sqlite3`,
-  `postgresql-client` (`psql`), `shellcheck` and `shfmt` in a final **extra tools**
+  `less`, `ffmpeg`, `imagemagick` (ImageMagick 7 — the command is `magick`) in the
+  base layer; `sqlite3`, `postgresql-client` (`psql`), `shellcheck`, `shfmt`,
+  `fzf` (bound to Ctrl+R) and `just` in a final **extra tools**
   layer you can extend — either by editing that list in the `Dockerfile` or via the
   `extraPackages` option. Being last, changing it leaves every other layer cached.
 - **Microphone and clipboard (Linux hosts):** `/voice` dictation and image paste
@@ -83,7 +86,6 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 
 | Option | Default | Values |
 |--------|---------|--------|
-| `imageVariant` | `ubuntu-24.04` | `ubuntu-24.04`, `ubuntu-22.04` |
 | `pythonVersion` | `os-provided` | `os-provided`, `3.12`, `3.11`, … |
 | `nodeVersion` | `lts` | `lts`, `none`, `22`, `20`, … |
 | `claudeLanguage` | `portuguese` | `portuguese`, `english`, `spanish`, … |
@@ -91,12 +93,15 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 | `buildProgress` | `plain` | `plain`, `auto` |
 | `installPlaywright` | `true` | `true`, `false` |
 | `playwrightHeadless` | `false` | `true`, `false` |
+| `installCodex` | `false` | `true`, `false` |
+| `installDocker` | `./features/no-docker` | `./features/no-docker`, `ghcr.io/devcontainers/features/docker-in-docker:2` |
 
 ### Verified versions
 
 The smoke test builds the container and asserts the toolchain end to end. A fresh
-build currently yields: Python 3.12.3, Poetry 2.4.1, pyenv 2.7.3, Node v24.18.1
-(nvm), Claude Code 2.1.220, gh 2.96.0, Playwright 1.62.0 (Chromium).
+build on Ubuntu 26.04 currently yields: Python 3.14.4, Poetry 2.4.1, pyenv 2.8.4,
+Node v24.19.0 (nvm), Claude Code 2.1.235, gh 2.97.0, ImageMagick 7.1.2 (`magick`),
+just 1.45.0, fzf 0.67.0, and the Playwright release that `@playwright/mcp` pins.
 
 ## Usage
 
@@ -118,7 +123,7 @@ The CLI does not prompt for options; set them non-interactively with `-a` (JSON)
 
 ```bash
 devcontainer templates apply -t ghcr.io/bolaum/devcontainer-templates/base \
-  -a '{"pythonVersion":"3.12","nodeVersion":"22","imageVariant":"ubuntu-24.04"}'
+  -a '{"pythonVersion":"3.12","nodeVersion":"22","installCodex":"true"}'
 ```
 
 ### Use a local template (before publishing)
@@ -252,14 +257,22 @@ The template bridges both from the host, on **Linux**:
 
 | What | How |
 |------|-----|
-| Audio | `$XDG_RUNTIME_DIR/pulse/native` bind-mounted to `/tmp/host-pulse`, with `PULSE_SERVER=unix:/tmp/host-pulse` |
-| Clipboard | `$XDG_RUNTIME_DIR/wayland-0` bind-mounted to `/tmp/host-wayland`, with `WAYLAND_DISPLAY=/tmp/host-wayland` (an absolute value is used as-is by libwayland) |
+| Audio | `$XDG_RUNTIME_DIR/pulse/native` bind-mounted to `/run/host-pulse`, with `PULSE_SERVER=unix:/run/host-pulse` |
+| Clipboard | `$XDG_RUNTIME_DIR/wayland-0` bind-mounted to `/run/host-wayland`, with `WAYLAND_DISPLAY=/run/host-wayland` (an absolute value is used as-is by libwayland) |
 | Packages | `sox`, `libsox-fmt-pulse`, `alsa-utils`, `libasound2-plugins`, `pulseaudio-utils`, `wl-clipboard`, `xclip` |
 | ALSA | `/etc/asound.conf` routes `default` to pulse, so `arecord` finds a device |
 
 `libsox-fmt-pulse` is the non-obvious bit: installing `sox` alone only brings the
 ALSA backend, which has no card to open here, so `rec` fails even though sox is
 installed.
+
+The sockets land in `/run`, not `/tmp`, and that is load-bearing: `/tmp` is fair
+game for anything that runs before you. The docker-in-docker feature's entrypoint,
+for instance, mounts a `tmpfs` over `/tmp` on every container **start**, long after
+Docker bound the sockets there — so they get shadowed with no error anywhere.
+`docker inspect` still lists the mounts, and what you see instead is a silent
+microphone, a browser that cannot reach the compositor, and `git push` without an
+agent.
 
 Check it from inside the container with `pactl info` (should report the host's
 PulseAudio/PipeWire server), `rec -q -t wav /tmp/t.wav trim 0 1` (should produce a
@@ -363,7 +376,7 @@ only for the GitHub API.** Neither one can reach beyond what it needs.
 
 ### Git: the ssh agent is forwarded
 
-The host's `$SSH_AUTH_SOCK` is mounted at `/tmp/host-ssh-agent`. The container
+The host's `$SSH_AUTH_SOCK` is mounted at `/run/host-ssh-agent`. The container
 asks the agent **on the host** to sign; the private key never enters the
 container, so there is nothing to leak into a log, a volume or an image layer.
 Clone, fetch and push over ssh just work — no token involved.
@@ -429,6 +442,7 @@ VS Code) is a cheap operation.
 | `devcontainer-poetry-<id>` | `~/.cache/pypoetry` | Poetry cache **and its virtualenvs** — the project's env, not just the downloads |
 | `devcontainer-pyenv-<id>` | `~/.pyenv/versions` | Pythons compiled with `pyenv install` (minutes each) |
 | `devcontainer-gh-<id>` | `~/.config/gh` | The project's GitHub token (see [GitHub access](#github-access)) |
+| `devcontainer-codex-<id>` | `~/.codex` | The Codex login, when `installCodex` is on (mounted either way) |
 | `devcontainer-playwright-browsers` | `~/.cache/ms-playwright` | Chromium — the one **global** volume (see below) |
 
 `<id>` is `${devcontainerId}`, which the tooling derives from the workspace: two
@@ -453,9 +467,10 @@ pyenv versions, the `gh` account. It exits non-zero if anything was lost.
 Two details make the result trustworthy. It writes a **control file in `$HOME`**,
 which is *not* a volume: if that file is still there on the second run, the
 container was never rebuilt and the script says so instead of reporting a
-meaningless success. And it keeps its state in the workspace (a bind mount that
-always survives) plus a marker in `/tmp` (which dies with the container), so
-running it twice without rebuilding is detected rather than passed.
+meaningless success. And it keeps its state in `.devcontainer/`
+— i.e. in the workspace, a bind mount that always survives — plus a marker in
+`/tmp` (which dies with the container), so running it twice without rebuilding is
+detected rather than passed.
 
 `--reset` starts over.
 
@@ -477,13 +492,96 @@ Notes and caveats:
 - **Ownership.** A fresh volume inherits the ownership of the image directory it
   covers (uid 1000), which is the wrong user when `updateRemoteUserUID` remaps
   `vscode` to a host UID other than 1000. `setup-persist.sh` runs first in
-  `postCreate` and fixes it.
+  `postCreate` and fixes it — including `XDG_RUNTIME_DIR`, which is not persisted
+  but is created at build time and has the same problem. Nothing in the template
+  assumes uid 1000 at runtime; `id -u` is the only source.
 - **Cleaning up.** Volumes accumulate as projects come and go:
 
   ```bash
   docker volume ls --filter name=devcontainer-
   docker volume rm devcontainer-claude-<id> …   # or `docker volume prune` for all unused
   ```
+
+## Verifying a container
+
+`.devcontainer/VERIFY.md` is a checklist written for an agent. Point Claude at it
+from inside the container and it sweeps everything the template wires up — the
+Claude install, the persisted volumes, the host bridges, GitHub access, the
+browser, the toolbox, the shell — and reports per item:
+
+```
+Read .devcontainer/VERIFY.md and work through it.
+```
+
+It marks the handful of things a shell cannot settle (did the microphone actually
+capture sound? did the browser window appear?) as needing a person, so a clean run
+is not mistaken for a fully verified one. The repo's own `scripts/test.sh` covers
+the same ground non-interactively, but only for this repository — `VERIFY.md`
+ships with the template and works in the project you applied it to.
+
+## Docker inside the container (opt-in)
+
+Option `installDocker`, off by default. Set it to
+`ghcr.io/devcontainers/features/docker-in-docker:2` to get a Docker daemon inside
+this container, so a project's own `compose.yaml` is built and run from in here.
+
+**Why the option's value is a feature ID.** The Template spec only substitutes
+strings — it cannot add or remove a features entry — and the docker-in-docker
+feature has no off switch of its own (`version: "none"` still applies its static
+metadata: `privileged`, the entrypoint, the volumes). So the option substitutes the
+feature's *ID*, and "off" needs some ID to put there instead:
+`./features/no-docker`, a local feature that installs nothing.
+
+It is off by default because it makes the container **privileged**, which the
+feature requires and does not let you turn off.
+
+`moby: false` is passed and is **required on Ubuntu 26.04**: the feature defaults
+to the Moby packages, which are not built for `resolute`, and it refuses to install
+rather than fall back. With `false` it installs Docker CE from
+`download.docker.com` — `docker-ce`, `docker-ce-cli`, `containerd.io`,
+`docker-buildx-plugin`, `docker-compose-plugin`, i.e. exactly the package set in
+[Docker's own Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/).
+
+What the feature adds on top of that `apt install` is the part worth not
+rewriting: a container has no systemd, so something has to start and supervise
+`dockerd` and `containerd`, set up cgroup v2 delegation and pick between iptables
+and nftables. That is ~200 lines of generated entrypoint
+(`/usr/local/share/docker-init.sh`), and it is why this uses the feature rather
+than hand-rolled `RUN` lines.
+
+The rest is already in place and inert until you turn it on:
+
+- `setup-docker.sh` in `postCreate` waits for the daemon and checks `compose` and
+  `buildx`, so a broken daemon fails the create instead of surfacing later as a
+  confusing project error;
+- `DOCKER_CONFIG=/home/vscode/.docker-cli` keeps the CLI's config out of
+  `~/.docker`, where VS Code writes a `credsStore` pointing at a host credential
+  helper that fails in here and breaks **every** `docker pull`, anonymous ones
+  included;
+- `init: true` reaps the zombies a background `dockerd`/`containerd` leaves behind;
+- the host bridges live in `/run` precisely because this feature's entrypoint
+  mounts a `tmpfs` over `/tmp` on every start.
+
+Not the host's socket (docker-outside-of-docker): handing over
+`/var/run/docker.sock` is root on the host, and bind-mount paths in a sibling
+container resolve against the **host** filesystem, so a relative path in a
+`compose.yaml` would silently point at nothing.
+
+The nested daemon's images, containers and volumes persist in
+`dind-var-lib-docker-<id>` and `dind-var-lib-containerd-<id>`, named per workspace
+like the rest.
+
+## Codex alongside Claude (opt-in)
+
+Option `installCodex` (default `false`) installs the OpenAI Codex CLI next to
+Claude Code. Only the CLI: `codex login` is an interactive browser round trip
+against a personal account, and which account a container gets to spend is your
+decision, not a setup step's.
+
+The credentials it writes to `~/.codex/auth.json` live in the per-project
+`devcontainer-codex-<id>` volume, so the login survives rebuilds. The volume is
+mounted whether or not the CLI is installed — an empty volume costs nothing, and a
+mount cannot be made conditional either.
 
 ## Publishing to GHCR
 
@@ -526,6 +624,16 @@ Use `--no-cache` (or `NO_CACHE=1`) when you want the build to run from scratch �
 a cached image can hide a broken `Dockerfile`/feature step. It passes
 `--build-no-cache --remove-existing-container` to `devcontainer up`. CI runners are
 ephemeral, so CI already builds fresh every run.
+
+An option whose default is off is not exercised by that run. Override it:
+
+```bash
+TEMPLATE_OPTIONS='installDocker=ghcr.io/devcontainers/features/docker-in-docker:2' \
+    bash scripts/test.sh base
+```
+
+The docker checks in `test/base/test.sh` are skipped when there is no docker CLI,
+so both runs are green for the right reason.
 
 ## Docs & git hooks
 

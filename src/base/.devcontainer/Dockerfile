@@ -1,5 +1,9 @@
-ARG VARIANT=ubuntu-24.04
-FROM mcr.microsoft.com/devcontainers/base:${VARIANT}
+# Pinned to the current Ubuntu LTS rather than exposed as an option: the layers
+# below install packages this release has (`just` arrived in 26.04, ImageMagick
+# is 7 here), so an older base would fail the build instead of degrading. Bump
+# this line when the next LTS lands, and note the tag has NO dash — the
+# devcontainers base image publishes `ubuntu26.04`, not `ubuntu-26.04`.
+FROM mcr.microsoft.com/devcontainers/base:ubuntu26.04
 
 # Point apt at the fastest mirror reachable from this machine, BEFORE any layer
 # below installs anything — on a network where archive.ubuntu.com is slow, that
@@ -87,7 +91,7 @@ RUN printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > /etc/a
 
 # Chromium's system libraries, baked into the image so creating a container does
 # not re-install ~200 MB of packages every time. The list is what
-# `playwright install-deps --dry-run chromium` asks for on Ubuntu 24.04; the
+# `playwright install-deps --dry-run chromium` asks for on Ubuntu; the
 # browser binary itself is installed in postCreate into a shared volume.
 ARG INSTALL_PLAYWRIGHT=true
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -138,6 +142,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #     volumes to be writable on first use.
 RUN mkdir -p \
         /home/vscode/.claude \
+        /home/vscode/.codex \
         /home/vscode/.config/gh \
         /home/vscode/.vscode-server \
         /home/vscode/.persist \
@@ -147,6 +152,7 @@ RUN mkdir -p \
         /home/vscode/.cache/ms-playwright \
     && chown -R vscode:vscode \
         /home/vscode/.claude \
+        /home/vscode/.codex \
         /home/vscode/.config \
         /home/vscode/.vscode-server \
         /home/vscode/.persist \
@@ -155,8 +161,23 @@ RUN mkdir -p \
 
 # XDG_RUNTIME_DIR for the container (see devcontainer.json): a headed Chromium
 # talking to the host's Wayland compositor expects one, and there is no logind
-# session in a container to create it.
-RUN mkdir -p /tmp/xdg-runtime && chown vscode:vscode /tmp/xdg-runtime && chmod 700 /tmp/xdg-runtime
+# session in a container to create it. libwayland insists on mode 0700 owned by
+# the running user, and this `chown` bakes in whatever uid `vscode` has at BUILD
+# time — `updateRemoteUserUID` can change it afterwards, which is why
+# setup-persist.sh re-checks the owner at postCreate.
+#
+# In /run, not /tmp: a plain directory in the image, so it survives whatever a
+# feature's entrypoint mounts over /tmp. A `--tmpfs` in runArgs would be the
+# other way to get one, but it would have to hardcode uid=1000 — the mount is
+# set up before any of the container's own code can ask what the UID actually is.
+RUN mkdir -p /run/xdg-runtime && chown vscode:vscode /run/xdg-runtime && chmod 700 /run/xdg-runtime
+
+# The docker CLI's config dir (DOCKER_CONFIG in devcontainer.json). Created here,
+# owned by vscode, so the very first `docker` command has somewhere to write
+# instead of falling back to ~/.docker — which VS Code fills with a credential
+# helper that does not work in here. Empty and harmless when the docker-in-docker
+# feature is not enabled.
+RUN mkdir -p /home/vscode/.docker-cli && chown vscode:vscode /home/vscode/.docker-cli
 
 # pyenv for the vscode user (extra Python versions compiled on demand)
 USER vscode
@@ -203,4 +224,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         shellcheck \
         shfmt \
         fzf \
+        # A command runner for the project's own tasks. Only packaged from Ubuntu
+        # 26.04 on, which is one reason the base image is pinned to it.
+        just \
         $EXTRA_PACKAGES

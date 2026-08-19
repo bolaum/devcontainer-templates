@@ -1,20 +1,11 @@
 {
     "id": "base",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "name": "Base (Ubuntu + Claude + pyenv/nvm)",
     "description": "Isolated Ubuntu environment to start any project without polluting the host. Python via the official feature + Poetry, pyenv (with build deps) to compile other versions on demand, Node via nvm, GitHub CLI and a CLI toolbox (jq, ripgrep, fd, sqlite3, ffmpeg…). Claude Code comes preinstalled and preconfigured — settings.json, statusline and auth reused from the host — plus microphone, clipboard and a Playwright browser bridged from the host desktop.",
     "documentationURL": "https://github.com/bolaum/devcontainer-templates/tree/main/src/base",
     "licenseURL": "https://github.com/bolaum/devcontainer-templates/blob/main/LICENSE",
     "options": {
-        "imageVariant": {
-            "type": "string",
-            "description": "Base Ubuntu version.",
-            "proposals": [
-                "ubuntu-24.04",
-                "ubuntu-22.04"
-            ],
-            "default": "ubuntu-24.04"
-        },
         "pythonVersion": {
             "type": "string",
             "description": "Python version installed by the official feature (os-provided uses the system one; pyenv stays available for others).",
@@ -69,6 +60,20 @@
             "type": "boolean",
             "description": "Install Playwright with Chromium and register the Playwright MCP server, so Claude can browse pages. Adds a few hundred MB (browsers are cached in a shared volume).",
             "default": true
+        },
+        "installCodex": {
+            "type": "boolean",
+            "description": "Install the OpenAI Codex CLI alongside Claude Code. Only the CLI: the login is interactive and stays yours to run once, and its credentials persist in a per-project volume.",
+            "default": false
+        },
+        "installDocker": {
+            "type": "string",
+            "description": "Run a Docker daemon inside the container (docker-in-docker), so a project's own compose.yaml runs from in here. The value is a feature ID because the Template spec can only substitute strings; './features/no-docker' is a local feature that installs nothing. Enabling it makes the container privileged, which the feature requires.",
+            "proposals": [
+                "./features/no-docker",
+                "ghcr.io/devcontainers/features/docker-in-docker:2"
+            ],
+            "default": "./features/no-docker"
         },
         "claudeLanguage": {
             "type": "string",

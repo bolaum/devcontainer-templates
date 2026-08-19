@@ -86,3 +86,23 @@ if command -v fzf >/dev/null 2>&1 && case "$-" in *i*) true ;; *) false ;; esac;
         fi
     fi
 fi
+
+# `just` recipe completion. Generated at shell start rather than vendored: the
+# completion script comes from the `just` binary itself, so it reads the
+# justfile's recipes at the moment you press Tab — including one added five
+# seconds ago — and can never be out of step with the installed version.
+#
+# Guarded on the binary because `just` is only packaged from Ubuntu 26.04 on (see
+# the extra tools layer in the Dockerfile).
+if command -v just >/dev/null 2>&1; then
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        # zsh registers a completion only after compinit has run, and the image
+        # does not run it by default. It is idempotent and costs milliseconds, so
+        # this calls it unconditionally rather than testing whether a user's own
+        # .zshrc got there first.
+        autoload -Uz compinit && compinit -u 2>/dev/null
+        eval "$(just --completions zsh)"
+    elif [ -n "${BASH_VERSION:-}" ]; then
+        eval "$(just --completions bash)"
+    fi
+fi

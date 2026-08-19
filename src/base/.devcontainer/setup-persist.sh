@@ -14,6 +14,7 @@ set -euo pipefail
 # Kept in sync with the volume mounts in devcontainer.json.
 PERSISTED_DIRS=(
     "$HOME/.claude"
+    "$HOME/.codex"
     "$HOME/.config/gh"
     "$HOME/.vscode-server"
     "$HOME/.persist"
@@ -24,8 +25,17 @@ PERSISTED_DIRS=(
     "$HOME/.pyenv/versions"
 )
 
+# Not a volume, and not persisted — but it has the same problem for the same
+# reason. The Dockerfile creates XDG_RUNTIME_DIR as uid 1000 at build time, and
+# the UID remap happens afterwards, so on a host whose user is not 1000 it ends
+# up owned by a stranger. libwayland then refuses it and a headed Chromium dies
+# with "Failed to connect to Wayland display". Nothing here may assume 1000:
+# `id -u` is the only honest source.
+PERSISTED_DIRS+=("${XDG_RUNTIME_DIR:-}")
+
 fixed=0
 for dir in "${PERSISTED_DIRS[@]}"; do
+    [ -n "$dir" ] || continue
     [ -d "$dir" ] || continue
     # -O is true when the current user owns it: the common case, no sudo needed.
     [ -O "$dir" ] && continue

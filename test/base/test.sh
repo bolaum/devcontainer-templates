@@ -40,6 +40,13 @@ check "sox pulse backend" bash -c "sox --help 2>&1 | grep -qw pulseaudio"
 check "arecord (voice fallback)" bash -lic "command -v arecord"
 check "alsa routed to pulse" bash -c "grep -q pulse /etc/asound.conf"
 check "PULSE_SERVER set" bash -c '[ -n "$PULSE_SERVER" ]'
+# Under /run, not /tmp — see the mounts in devcontainer.json. A bridge in /tmp is
+# one tmpfs away from being silently invisible (the docker-in-docker entrypoint
+# mounts exactly that, on every container start).
+check "host bridges under /run" bash -c '
+    for p in "$PULSE_SERVER" "$WAYLAND_DISPLAY" "$SSH_AUTH_SOCK" "$XDG_RUNTIME_DIR"; do
+        case "${p#unix:}" in /run/*) ;; *) echo "not under /run: $p"; exit 1 ;; esac
+    done'
 check "wl-paste (clipboard)" bash -lic "command -v wl-paste"
 check "xclip (clipboard fallback)" bash -lic "command -v xclip"
 check "WAYLAND_DISPLAY set" bash -c '[ -n "$WAYLAND_DISPLAY" ]'
@@ -53,22 +60,29 @@ check "ripgrep" bash -lic "rg --version"
 check "fd" bash -lic "fd --version"
 check "tree" bash -lic "tree --version"
 check "ffmpeg" bash -lic "ffmpeg -version"
-check "imagemagick" bash -lic "convert --version"
+check "imagemagick" bash -lic "magick --version"
 # Installed by the "extra tools" layer, the last one in the Dockerfile.
 check "sqlite3" bash -lic "sqlite3 --version"
 check "psql" bash -lic "psql --version"
 check "shellcheck" bash -lic "shellcheck --version"
 check "shfmt" bash -lic "shfmt --version"
+check "just" bash -lic "just --version"
 check "fzf" bash -lic "fzf --version"
 # fzf takes over Ctrl+R for fuzzy history search — wired in shell/rc.sh, which
 # has to cope with the integration script having moved between fzf releases.
 # -X lists bindings to shell commands (what fzf 0.44 uses), -p the macro ones.
 check "fzf bound to Ctrl+R" bash -lic 'bind -X 2>/dev/null | grep -q fzf || bind -p 2>/dev/null | grep -q fzf'
+# Generated from the `just` binary at shell start, so it can never lag the justfile.
+check "just completions loaded" bash -lic 'complete -p just'
 check "gh" bash -lic "command gh --version"
+# Set even with the docker feature off: the variable and the directory are what
+# stop VS Code's host credential helper from landing in ~/.docker later, where it
+# breaks every `docker pull`, anonymous ones included.
+check "DOCKER_CONFIG kept off ~/.docker" bash -c '[ "$DOCKER_CONFIG" = "$HOME/.docker-cli" ] && [ -w "$DOCKER_CONFIG" ]'
 
 # GitHub auth: the container holds no host credential. The key signs on the host
 # through the forwarded agent, and `gh` gets a per-repo token via `gh-login`.
-check "ssh agent forwarded" bash -c '[ "$SSH_AUTH_SOCK" = "/tmp/host-ssh-agent" ] && [ -e "$SSH_AUTH_SOCK" ]'
+check "ssh agent forwarded" bash -c '[ "$SSH_AUTH_SOCK" = "/run/host-ssh-agent" ] && [ -e "$SSH_AUTH_SOCK" ]'
 # A host token would reach every repo the user can — nothing should inherit one.
 check "no host GitHub token" bash -lic '[ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]'
 check "gh-login available" bash -lic "type gh-login"
@@ -81,6 +95,9 @@ check "playwright MCP registered" bash -lic "grep -q playwright-mcp \$HOME/.clau
 # Chrome's sandbox needs privileges the container lacks: without --no-sandbox the
 # browser aborts, so the MCP server would be registered but useless.
 check "MCP config generated" test -f "$HOME/.claude/playwright-mcp.json"
+# With no outputDir the server resolves screenshots against its working
+# directory, i.e. wherever Claude was started — in practice the project root.
+check "MCP output kept out of the repo root" bash -c 'grep -q outputDir "$HOME/.claude/playwright-mcp.json"'
 check "MCP disables chrome sandbox" bash -c "grep -q -- '--no-sandbox' \$HOME/.claude/playwright-mcp.json"
 # Headed by default, rendering on the host compositor through the Wayland socket.
 check "browser is headed" bash -c "grep -q '\"headless\": false' \$HOME/.claude/playwright-mcp.json"
@@ -108,11 +125,12 @@ check "pip cache persisted" mountpoint -q "$HOME/.cache/pip"
 check "poetry cache persisted" mountpoint -q "$HOME/.cache/pypoetry"
 check "pyenv versions persisted" mountpoint -q "$HOME/.pyenv/versions"
 check "gh config persisted" mountpoint -q "$HOME/.config/gh"
+check "codex login persisted" mountpoint -q "$HOME/.codex"
 check "playwright browsers persisted" mountpoint -q "$HOME/.cache/ms-playwright"
 # A fresh volume takes the image directory's ownership (uid 1000), which is the
 # wrong user whenever updateRemoteUserUID remaps vscode to a host UID != 1000.
 check "persisted dirs writable" bash -c '
-    for d in "$HOME/.claude" "$HOME/.config/gh" "$HOME/.vscode-server" "$HOME/.persist" \
+    for d in "$HOME/.claude" "$HOME/.codex" "$HOME/.config/gh" "$HOME/.vscode-server" "$HOME/.persist" \
              "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/pypoetry" \
              "$HOME/.cache/ms-playwright" "$HOME/.pyenv/versions"; do
         [ -w "$d" ] || { echo "not writable: $d"; exit 1; }
@@ -131,6 +149,29 @@ check "history flushed on every command" bash -c '
     grep -q "$marker" "$HOME/.persist/bash_history"'
 # The end-to-end checker ships with the template (cwd here is <workspace>/test-project).
 check "persistence checker present" bash -c 'test -x "$(dirname "$PWD")/.devcontainer/check-persistence.sh"'
+
+# Docker, only when the installDocker option selected the real feature. With the
+# default (./features/no-docker) there is no docker CLI and these are skipped —
+# run them with:
+#   TEMPLATE_OPTIONS='installDocker=ghcr.io/devcontainers/features/docker-in-docker:2' \
+#       bash scripts/test.sh base
+if command -v docker >/dev/null 2>&1; then
+    check "nested docker daemon up" docker info
+    check "docker compose plugin" docker compose version
+    check "docker buildx plugin" docker buildx version
+    # Fails with "error getting credentials - err: exit status 255" if the CLI
+    # falls back to ~/.docker and finds VS Code's host credential helper there.
+    check "anonymous pull works" docker run --rm hello-world
+    # The feature's entrypoint mounts a tmpfs over /tmp on every container start.
+    # This is the check that would have caught the sockets being shadowed, back
+    # when they lived there.
+    check "host bridges survive the dind entrypoint" bash -c '
+        for p in "$PULSE_SERVER" "$WAYLAND_DISPLAY" "$SSH_AUTH_SOCK" "$XDG_RUNTIME_DIR"; do
+            [ -e "${p#unix:}" ] || { echo "shadowed: $p"; exit 1; }
+        done'
+else
+    echo "⏭️  docker checks skipped (installDocker is off)"
+fi
 
 # Report results
 reportResults

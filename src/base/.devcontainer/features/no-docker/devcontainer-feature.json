@@ -1,0 +1,13 @@
+{
+    "id": "no-docker",
+    "version": "1.0.0",
+    "name": "No Docker (placeholder)",
+    "description": "Installs nothing. It exists so `installDocker` can be a real template option: the spec substitutes strings, so the docker-in-docker feature is selected by substituting its *id*, and turning it off needs some id to put there instead.",
+    "options": {
+        "moby": {
+            "type": "boolean",
+            "default": false,
+            "description": "Ignored. Declared only because the options object in devcontainer.json is shared with the docker-in-docker feature this one stands in for, and an undeclared option would be reported as unknown."
+        }
+    }
+}

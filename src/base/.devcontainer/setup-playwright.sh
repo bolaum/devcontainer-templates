@@ -16,6 +16,7 @@ fi
 BROWSERS_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 CONFIG_FILE="$HOME/.claude/playwright-mcp.json"
 HEADLESS="${PLAYWRIGHT_HEADLESS:-false}"
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # A fresh named volume is mounted root-owned; without this the install cannot
 # write into it.
@@ -81,8 +82,23 @@ else
     browser_args='"--no-sandbox", "--disable-dev-shm-usage", "--ozone-platform=wayland", "--enable-features=UseOzonePlatform"'
 fi
 
-cat > "$CONFIG_FILE" <<EOF
+# Written only when absent, so hand edits (a different viewport, extra browser
+# flags, another output directory) survive every rebuild. Delete the file to get
+# these defaults back.
+#
+# outputDir keeps screenshots and page snapshots out of the project root: with no
+# setting the server resolves them against its own working directory, which is
+# wherever Claude was started — which in practice means image files appearing at
+# the top of the repository. Add .playwright-mcp/ to the project's .gitignore.
+# Caveat: only a *default* filename lands there. An explicit relative `filename`
+# is still resolved against the working directory, so pass an absolute path or no
+# filename at all.
+if [ -e "$CONFIG_FILE" ]; then
+    echo "   keeping the existing MCP config: $CONFIG_FILE (delete it to regenerate)"
+else
+    cat > "$CONFIG_FILE" <<EOF
 {
+  "outputDir": "$WORKSPACE_DIR/.playwright-mcp",
   "browser": {
     "browserName": "chromium",
     "launchOptions": {
@@ -95,6 +111,7 @@ cat > "$CONFIG_FILE" <<EOF
   }
 }
 EOF
+fi
 
 # Register the MCP server for the container user. Re-running is fine: the old
 # entry is dropped first so the command never fails on "already exists".

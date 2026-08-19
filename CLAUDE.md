@@ -56,8 +56,17 @@ Each template's `.devcontainer/` sets up Claude the same way:
   `arecord`, and image paste shells out to `wl-paste`/`xclip`. The container has
   no `/dev/snd` and no display, so `mounts` bind the host's PipeWire/PulseAudio
   socket (`$XDG_RUNTIME_DIR/pulse/native`) and Wayland socket
-  (`$XDG_RUNTIME_DIR/wayland-0`) to fixed paths under `/tmp`, pointed at by
-  `containerEnv` (`PULSE_SERVER`, absolute `WAYLAND_DISPLAY`). The `Dockerfile`
+  (`$XDG_RUNTIME_DIR/wayland-0`) to fixed paths under **`/run`**, pointed at by
+  `containerEnv` (`PULSE_SERVER`, absolute `WAYLAND_DISPLAY`). `/run` and not
+  `/tmp`: the docker-in-docker feature's entrypoint mounts a `tmpfs` over `/tmp`
+  on every container *start*, long after Docker bound the sockets there, and the
+  shadowing is completely silent — `docker inspect` still lists the mounts while
+  the microphone goes mute, Chromium cannot reach the compositor and `git push`
+  finds no agent. `XDG_RUNTIME_DIR` moved along with them, and stays a plain
+  directory created in the `Dockerfile` rather than a `--tmpfs` in `runArgs`,
+  because that mount would have to hardcode `uid=1000` — it is set up before any
+  code in the container can ask what the UID actually is. `setup-persist.sh`
+  re-`chown`s it at postCreate for the same reason it does the volumes. The `Dockerfile`
   installs `sox` **plus `libsox-fmt-pulse`** (sox alone only gets the ALSA backend,
   which has no card to open here) and writes `/etc/asound.conf` routing ALSA to
   pulse so `arecord` works too.
@@ -66,7 +75,8 @@ Each template's `.devcontainer/` sets up Claude the same way:
   file-history), `~/.vscode-server` (hand-installed extensions + server binary),
   `~/.persist` (shell history, via `HISTFILE` in `shell/rc.sh`), `~/.npm`,
   `~/.cache/pip`, `~/.cache/pypoetry` (holds the virtualenvs too),
-  `~/.pyenv/versions` and `~/.config/gh`. `~/.cache/ms-playwright` is the **one
+  `~/.pyenv/versions`, `~/.config/gh` and `~/.codex` (the Codex login, mounted
+  whether or not `installCodex` is on — a mount cannot be conditional). `~/.cache/ms-playwright` is the **one
   global** volume on purpose: Chromium is immutable content, not per-project state.
   Two consequences to keep in mind when touching this: the mount points must be
   created and `chown`ed in the `Dockerfile` (a fresh volume inherits the image
@@ -82,14 +92,17 @@ Each template's `.devcontainer/` sets up Claude the same way:
   uses it too.
   `check-persistence.sh` verifies all of this from inside a container (run it,
   rebuild, run it again). It infers the phase from two markers with different
-  lifetimes — state in the workspace (bind mount, always survives) and a session
-  marker in `/tmp` (dies with the container) — plus a control file in `$HOME`
+  lifetimes — state in `.devcontainer/` (in the workspace, so a bind mount that
+  always survives; gitignored there) and a session marker in `/tmp` (dies with
+  the container) — plus a control file in `$HOME`
   that *must* disappear, which is what stops a "rebuild" that never happened from
   reporting success. Keep `TARGETS` in it in sync with the volume mounts.
 - `postCreateCommand` runs `postCreate.sh`, which iterates over a `STEPS` array
   and prints `▶ [n/total] <script>` before each one, so a slow step is visibly a
-  slow step and not a hang. Two positions are deliberate: `setup-persist.sh`
-  first (volumes must be writable before anything writes to them) and
+  slow step and not a hang. Three positions are deliberate: `setup-persist.sh`
+  first (volumes must be writable before anything writes to them),
+  `setup-docker.sh` **late** (it waits for a daemon the feature's entrypoint
+  starts in the background, so every step before it is free waiting time) and
   `setup-apt.sh` **last** (the slowest step, hostage to mirror speed, and nothing
   else depends on it). The steps are:
   `setup-apt.sh` runs `apt-get update` so `sudo apt install <pkg>` works in a fresh
@@ -102,7 +115,13 @@ Each template's `.devcontainer/` sets up Claude the same way:
   credentials) is not enough to skip it. It must merge, not overwrite: the native
   installer already creates `~/.claude.json` at build time (`installMethod`,
   `machineID`, …), and a plain "create if absent" silently skips the seeding while
-  overwriting would drop the install metadata. `setup-shell.sh` sources
+  overwriting would drop the install metadata.
+  `setup-codex.sh` installs the OpenAI Codex CLI when `installCodex` is on and
+  never logs in for you (`codex login` is an interactive browser round trip
+  against a personal account);
+  `setup-docker.sh` waits for the nested daemon and checks `compose`/`buildx`,
+  and no-ops when the docker feature is not enabled;
+  `setup-shell.sh` sources
   `.devcontainer/shell/rc.sh` (aliases/functions) into `~/.bashrc` and `~/.zshrc`.
 - **Auth is reused** via a bind-mount of the host's `~/.claude/.credentials.json`
   (declared in `mounts`). History/MCP/other state stay isolated per container.
@@ -150,6 +169,13 @@ Two mechanisms, both load-bearing — do not "simplify" them away:
 
 ## Templates: features in `base`
 
+- Base image: `mcr.microsoft.com/devcontainers/base:ubuntu26.04`, **hardcoded in
+  the `Dockerfile`** — there is deliberately no `imageVariant` option. The layers
+  install what the current LTS has (`just` only exists from 26.04, ImageMagick is
+  7), so an older base fails the build instead of degrading; supporting a range
+  would mean conditionals in every package list. Bump the `FROM` when the next LTS
+  lands. **The tag has no dash** — `ubuntu-26.04` is not published, only
+  `ubuntu26.04`, though both forms exist for 24.04 and 22.04.
 - Python: official `devcontainers/features/python` (option `pythonVersion`).
 - Poetry: `devcontainers-extra/features/poetry` (installs after Python).
 - Node: official `devcontainers/features/node` (nvm-based; option `nodeVersion`; no pnpm).
@@ -200,14 +226,52 @@ Two mechanisms, both load-bearing — do not "simplify" them away:
     to pay for once, up where the cache almost never invalidates.
     jq/tree/less/unzip/zip already ship in the base image and are listed only so
     it cannot silently lose them;
-  - the **extra tools layer** (sqlite3, postgresql-client, shellcheck, shfmt) is
-    the LAST layer of the Dockerfile. That is where new tools go: it is the list
+  - the **extra tools layer** (sqlite3, postgresql-client, shellcheck, shfmt,
+    fzf, just) is the LAST layer of the Dockerfile. That is where new tools go: it is the list
     that actually churns, and being last means editing it leaves every apt layer,
     pyenv and the Claude installer cached. It also appends `$EXTRA_PACKAGES` from
     the `extraPackages` template option, for per-project additions.
+    `just` is only packaged from Ubuntu 26.04 on, so this layer is one of the
+    reasons the base image is pinned there; `shell/rc.sh` generates its
+    completions from the binary at shell start (never vendored, so they cannot lag
+    the justfile). On 26.04 ImageMagick is 7 and the command is `magick` —
+    `convert` survives only as a legacy alternative.
+- **Docker (option `installDocker`, default off).** The option's value is a
+  *feature ID*, which looks odd and is forced: the spec only substitutes strings,
+  it cannot add or remove a features entry, and the docker-in-docker feature has
+  no off switch (`version: "none"` still applies `privileged`, the entrypoint and
+  its volumes). So the ID itself is substituted, and "off" points at
+  `./features/no-docker` — a local feature that installs nothing and exists only
+  to be that value. VS Code flags that line with "Failed to parse feature
+  identifier" — expected: the extension validates `features` keys as real IDs and
+  this file is template *source*. Do not "fix" it; there is no setting to silence
+  it either. Off by default because the feature makes the container privileged. **`moby: false` is mandatory on 26.04** — the Moby packages are not
+  built for `resolute` and the feature refuses to install rather than fall back;
+  with `false` it takes Docker CE from `download.docker.com`, which is the same
+  package set Docker's own Ubuntu instructions use. Do not replace the feature
+  with hand-written `RUN` lines: the `apt install` is the easy half, and what the
+  feature really provides is ~200 lines of generated `docker-init.sh` supervising
+  `dockerd`/`containerd` without systemd (cgroup v2 delegation, iptables vs
+  nftables). Around it, already wired and inert when off: `setup-docker.sh`,
+  `init: true`, and `DOCKER_CONFIG=/home/vscode/.docker-cli` — **do not** let the
+  CLI fall back to `~/.docker`, where VS Code writes a `credsStore` pointing at a
+  host credential helper that fails in here and breaks every `docker pull`,
+  anonymous ones included. Not the host socket either (that is root on the host,
+  and bind-mount paths in a sibling container resolve against the *host*
+  filesystem).
+- Codex (option `installCodex`, default `false`): `setup-codex.sh` npm-installs
+  `@openai/codex`. The CLI only — the login is interactive and deliberately never
+  automated. What has to survive is the `~/.codex` volume, not the binary.
 
 ## Working here
 
+- **Verifying a built container:** `src/<id>/.devcontainer/VERIFY.md` is a
+  checklist written for an agent to run *inside* a container ("Read
+  .devcontainer/VERIFY.md and work through it"). It ships with the template, so it
+  works in the project the template was applied to, and it marks the items a shell
+  cannot settle (did the mic capture sound? did the browser window appear?) as
+  needing a person. Keep it in sync with `test/<id>/test.sh`, which covers the same
+  ground non-interactively but only for this repo.
 - **Testing:** `bash scripts/test.sh <id|all>` — builds the container, brings it
   up, runs `test/<id>/test.sh` inside, then cleans up. Local and CI use the same
   script. Tests do not run on every PR.
