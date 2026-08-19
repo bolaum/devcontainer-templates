@@ -10,8 +10,10 @@ Report one line per item: `ok`, `FAIL` with the command's actual output, or
 sweep first, then propose fixes. Never report an item as `ok` without having run
 its command, and never soften a failure into a warning.
 
-Some items cannot be settled from a shell and are marked **[human]** — ask the
-person to look and tell you, or report `needs a human`.
+Some items cannot be settled from a shell and are marked **[human]**. Do NOT stop
+and ask when you reach one: run its command, keep the output, and carry on. They
+are all put to the person together at the end, as multiple choice — see
+"What only you can confirm".
 
 ---
 
@@ -20,7 +22,7 @@ person to look and tell you, or report `needs a human`.
 ```bash
 claude --version
 command -v claude                      # must be $HOME/.local/bin/claude
-test -w "$HOME/.local/share/claude"    # self-update needs this writable
+test -w "$HOME/.local/share/claude" && echo "ok: install dir writable (self-update)"
 python3 -c 'import json,os;d=json.load(open(os.path.expanduser("~/.claude.json")));print(d.get("hasCompletedOnboarding"), d.get("installMethod"))'
 ```
 
@@ -31,7 +33,7 @@ instead of overwriting it.
 
 ```bash
 jq '.language, .voice' "$HOME/.claude/settings.json"
-test -f "$HOME/.claude/statusline.py"
+test -f "$HOME/.claude/statusline.py" && echo "ok: statusline present"
 ```
 
 `language` drives both Claude's answers and `/voice` dictation.
@@ -83,14 +85,23 @@ had nothing to bind there — `initialize.sh` creates a placeholder so the conta
 still starts, and the corresponding feature is simply unavailable.
 
 ```bash
-timeout 5 rec -q -r 16000 -c 1 /tmp/verify-mic.wav trim 0 1 && \
-    ls -l /tmp/verify-mic.wav && rm -f /tmp/verify-mic.wav
+timeout 8 rec -q -r 16000 -c 1 /tmp/verify-mic.wav trim 0 3 && ls -l /tmp/verify-mic.wav
 wl-paste --list-types || echo "clipboard empty or unavailable"
 ```
 
-**[human]** Recording a non-empty file proves the audio path; whether it captured
-actual sound needs a person. Ask them to copy an image on the host, then re-run
-`wl-paste --list-types` and expect an `image/png`.
+**[human]** A non-empty file proves the *input* path exists; whether it captured
+real sound is question 1 at the end. Keep the recording rather than deleting it —
+you will play it back then. Clipboard contents are question 3.
+
+Output is a separate path and is not covered by the recording above — test it too:
+
+```bash
+play -qn synth 1 sine 440 vol 0.4
+```
+
+**[human]** A one-second tone should come out of the host's speakers — question 2
+at the end. A zero exit status only means the container reached PulseAudio; it says
+nothing about whether a sound was produced.
 
 ## 4. GitHub access
 
@@ -99,10 +110,17 @@ Two separate mechanisms, on purpose — git signs through the forwarded agent, a
 
 ```bash
 ssh-add -l                              # keys live on the host; this lists them
-ssh -T git@github.com 2>&1 | head -1    # "successfully authenticated" is success
+ssh -T -o StrictHostKeyChecking=accept-new git@github.com 2>&1 | head -1
 [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && echo "ok: no host token inherited"
 gh auth status
 ```
+
+`ssh -T` succeeds when the reply says "successfully authenticated". The
+`accept-new` is needed because `~/.ssh` is not a persisted volume: `known_hosts`
+is empty in every fresh container, and without it the check fails with "Host key
+verification failed" — a container problem, not an auth problem. It trusts the key
+on first use, which is the usual trade for a throwaway container; drop the flag and
+seed `known_hosts` yourself if you would rather not.
 
 A host token being present is a **failure**, not a convenience: it would reach
 every repository the user can. If `gh` is logged out, that is expected on a fresh
@@ -121,9 +139,20 @@ jq '.outputDir, .browser.launchOptions.headless, .browser.launchOptions.args' \
 `outputDir` must point inside the workspace, so screenshots do not land at the top
 of the repository.
 
+Caveat worth knowing before you trust it: `outputDir` only catches files the
+server names itself. A screenshot taken with an explicit *relative* `filename` is
+resolved against the server's working directory — the repo root — and lands there
+regardless.
+
+What actually bounds the damage is the server's allowed roots, which are
+`outputDir` and the workspace: an absolute path outside them is refused with
+`outside allowed roots: <repo>/.playwright-mcp, <repo>`. So pass no filename at
+all, or an absolute path inside `outputDir` — an absolute path elsewhere is
+rejected, and a relative one quietly lands in the repo root.
+
 Then actually drive it: use the playwright MCP tools to open `https://example.com`
 and take a screenshot. **[human]** With `headless: false` the window opens on the
-host desktop — ask whether they saw it.
+host desktop — that is question 4 at the end.
 
 ## 6. Command-line toolbox
 
@@ -139,25 +168,52 @@ ImageMagick 7 uses `magick`; `convert` still works as a legacy alternative.
 
 ## 7. Shell
 
+Everything here needs an **interactive** shell, so run it as one block. `HISTFILE`
+and the aliases come from `~/.bashrc`, which a non-interactive shell never reads —
+outside this block `$HISTFILE` is simply empty.
+
 ```bash
-echo "$HISTFILE"                        # must be under ~/.persist
-verify-marker-$$ 2>/dev/null; grep -c "verify-marker" "$HISTFILE"
+bash -i <<'EOF'
+echo "$HISTFILE"
+alias ll
+verify-marker-$$
+grep -c verify-marker "$HISTFILE"
 bind -X 2>/dev/null | grep -q fzf && echo "ok: Ctrl+R is fzf"
 complete -p just >/dev/null 2>&1 && echo "ok: just completions"
-alias ll
+exit
+EOF
 ```
 
-The `grep` must find the marker **while this shell is still running**. History is
-flushed on every command precisely because a rebuild kills the container before
-any shell gets to write its history on exit.
+`HISTFILE` must be under `~/.persist`, and the count must be **at least 1** — the
+marker is found while that shell is still running, which is the whole point:
+history is flushed on every command (`history -a` in `PROMPT_COMMAND`) because a
+rebuild kills the container before any shell gets to write its history on exit.
 
-Note these last two need an *interactive* shell: run them in a terminal, not
-through a non-interactive `bash -c`.
+Two things that will mislead you here:
+
+- **The count is not 1.** The `grep` line itself is appended to history before the
+  next prompt, so every run of this block adds two more matches — 1, then 3, then
+  5. Assert `>= 1`, never equality. And do not try to tighten it by grepping the
+  expanded PID: history stores the line as typed, `verify-marker-$$`, so that
+  returns 0.
+- **Do not use `bash -ic '...'`.** Bash records history for commands it reads from
+  its *input*; with `-c` the command comes from the argument instead, so it never
+  enters the history list and the grep returns 0 — or errors, on a fresh container
+  where the file does not exist yet. That is a false negative on a container that
+  is working perfectly. The dividing line is `-c` versus stdin, not whether there
+  is a terminal: the heredoc above has no pty and works fine.
 
 ## 8. Docker — only if enabled
 
-Only when `installDocker` is `on` — with the default (`off`) there is no docker
-CLI, and that is a `skipped`, not a failure.
+`installDocker` leaves no variable behind, so the only signal from in here is
+whether the CLI exists. Check first, and report `skipped` — not a failure — when
+it does not:
+
+```bash
+command -v docker >/dev/null || echo "skipped: installDocker is off"
+```
+
+The rest only when that found something:
 
 ```bash
 docker info >/dev/null && echo "ok: nested daemon up"
@@ -172,7 +228,16 @@ credential helper out of the way; in `~/.docker` it breaks every pull with
 
 ## 9. Codex — only if enabled
 
-Report `skipped` when `installCodex` is false.
+`INSTALL_CODEX` carries the option: `true` is on, and **empty** is off — an applied
+`devcontainer.json` holds `""` rather than `"false"`, because the CLI substitutes a
+falsy option value as an empty string. Decide before running anything, so a missing
+binary does not come back as exit 127:
+
+```bash
+[ "${INSTALL_CODEX:-}" = "true" ] || echo "skipped: installCodex is off"
+```
+
+Only when it is on:
 
 ```bash
 codex --version
@@ -184,9 +249,55 @@ persist in the `~/.codex` volume.
 
 ---
 
+## What only you can confirm
+
+Ask these **after** the sweep, all at once, as multiple-choice questions — one
+question per item, with the options given. Never guess an answer, and never mark a
+`[human]` item `ok` because its command exited zero: exit status here only proves
+the container reached the host, not that anything was seen or heard.
+
+Two of them need a prop first, so set that up before asking:
+
+```bash
+play -q /tmp/verify-mic.wav          # question 1: play back what was recorded
+rm -f /tmp/verify-mic.wav
+```
+
+For question 3, ask the person to copy an image on the host, then run
+`wl-paste --list-types` again and expect `image/png` among the types.
+
+**1. Microphone.** "I recorded three seconds from the host microphone and played
+it back. What happened?"
+- I heard the sound that was in the room → `ok`
+- Playback ran but was silent → `FAIL`, the bridge is up but nothing is captured
+- I heard nothing at all, not even playback → answer question 2 first, this may be output
+- I was not at the machine → `unverified`
+
+**2. Speakers.** "Did a one-second tone play on the host?"
+- Yes → `ok`
+- No, silence → `FAIL`, output path
+- There is no audio on this host → `skipped`
+
+**3. Clipboard.** "You copied an image on the host — did `wl-paste` list
+`image/png`?"
+- Yes → `ok`
+- It listed only text types → `FAIL`, the Wayland socket is reaching the wrong session
+- Nothing was listed / error → `FAIL`, no clipboard bridge
+- I did not copy anything → `unverified`
+
+**4. Browser window.** "A Chromium window should have opened on your desktop and
+navigated to example.com. Did you see it?"
+- Yes → `ok`
+- No window, but the screenshot came back → `FAIL` for headed mode only; the
+  browser works, it is not reaching the compositor
+- Neither → `FAIL`
+- This container runs `headless: true`, or the host has no desktop → `skipped`
+
+---
+
 ## Reporting
 
 Finish with a short summary: how many `ok`, what failed with the actual output,
-what was skipped and why, and which **[human]** items are still open. If
-everything passed except items needing a person, say that plainly rather than
-calling the container verified.
+what was skipped and why, and how each of the four questions above was answered.
+An item left `unverified` because the person was not there is not a pass — say so
+plainly rather than calling the container verified.
