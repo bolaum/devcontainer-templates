@@ -150,11 +150,9 @@ check "history flushed on every command" bash -c '
 # The end-to-end checker ships with the template (cwd here is <workspace>/test-project).
 check "persistence checker present" bash -c 'test -x "$(dirname "$PWD")/.devcontainer/check-persistence.sh"'
 
-# Docker, only when the installDocker option selected the real feature. With the
-# default (./features/no-docker) there is no docker CLI and these are skipped —
-# run them with:
-#   TEMPLATE_OPTIONS='installDocker=ghcr.io/devcontainers/features/docker-in-docker:2' \
-#       bash scripts/test.sh base
+# Docker, only when installDocker is 'on'. With the default ('off') there is no
+# docker CLI and these are skipped — run them with:
+#   TEMPLATE_OPTIONS='installDocker=on' bash scripts/test.sh base
 if command -v docker >/dev/null 2>&1; then
     check "nested docker daemon up" docker info
     check "docker compose plugin" docker compose version

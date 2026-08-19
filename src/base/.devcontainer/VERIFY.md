@@ -156,9 +156,8 @@ through a non-interactive `bash -c`.
 
 ## 8. Docker — only if enabled
 
-Only when the `installDocker` option selected the real feature — with the default
-(`./features/no-docker`) there is no docker CLI, and that is a `skipped`, not a
-failure.
+Only when `installDocker` is `on` — with the default (`off`) there is no docker
+CLI, and that is a `skipped`, not a failure.
 
 ```bash
 docker info >/dev/null && echo "ok: nested daemon up"

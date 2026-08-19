@@ -1,0 +1,6 @@
+{
+    "id": "docker-off",
+    "version": "1.0.0",
+    "name": "Docker off",
+    "description": "Installs nothing. Selected when installDocker is 'off'. The option is 'on'/'off' rather than true/false because the CLI substitutes a falsy option value as an empty string, which would make the 'false' case resolve to a directory that does not exist."
+}

@@ -236,29 +236,36 @@ Two mechanisms, both load-bearing — do not "simplify" them away:
     completions from the binary at shell start (never vendored, so they cannot lag
     the justfile). On 26.04 ImageMagick is 7 and the command is `magick` —
     `convert` survives only as a legacy alternative.
-- **Docker (option `installDocker`, default off).** The option's value is a
-  *feature ID*, which looks odd and is forced: the spec only substitutes strings,
-  it cannot add or remove a features entry, and the docker-in-docker feature has
-  no off switch (`version: "none"` still applies `privileged`, the entrypoint and
-  its volumes). So the ID itself is substituted, and "off" points at
-  `./features/no-docker` — a local feature that installs nothing and exists only
-  to be that value. VS Code flags that line with "Failed to parse feature
-  identifier" — expected: the extension validates `features` keys as real IDs and
-  this file is template *source*. Do not "fix" it; there is no setting to silence
-  it either. Off by default because the feature makes the container privileged. **`moby: false` is mandatory on 26.04** — the Moby packages are not
-  built for `resolute` and the feature refuses to install rather than fall back;
-  with `false` it takes Docker CE from `download.docker.com`, which is the same
-  package set Docker's own Ubuntu instructions use. Do not replace the feature
-  with hand-written `RUN` lines: the `apt install` is the easy half, and what the
+- **Docker (option `installDocker`, `off` by default).** Two traps live here,
+  both about how the CLI substitutes options.
+  *First*, the value is `on`/`off`, **never** `true`/`false`: substitution is
+  `templateArgs[name] || ""`, so a falsy value lands as an EMPTY STRING — a
+  boolean option would resolve to `./features/docker-` on its own default. (Same
+  quirk explains `PLAYWRIGHT_HEADLESS: ""` in applied configs.) Neither `-a` nor
+  the VS Code prompt validates against `enum`, so a wrong value is only caught by
+  whatever tries to use it; `scripts/apply.sh` validates, the official path does
+  not.
+  *Second*, the option picks a DIRECTORY (`./features/docker-on|off`) rather than
+  a feature ID. The spec cannot add or remove a features entry, and
+  docker-in-docker has no off switch (`version: "none"` still applies
+  `privileged`, the entrypoint, its volumes). `docker-on` installs nothing and
+  declares `dependsOn` on the real feature; the CLI aggregates metadata across all
+  installed features, so `privileged` and the rest propagate. An earlier design
+  substituted the feature ID directly and shipped a `no-docker` placeholder — it
+  worked, but answering the option `true` (which its name invites) produced
+  `"true"` as a features key and failed with "Legacy feature 'true' not
+  supported". Do not go back to it.
+  **`moby: false` is mandatory on 26.04** — the Moby packages are not built for
+  `resolute` and the feature refuses to install rather than fall back; with
+  `false` it takes Docker CE from `download.docker.com`, the same package set
+  Docker's own Ubuntu instructions use. Do not replace the feature with
+  hand-written `RUN` lines: the `apt install` is the easy half, and what the
   feature really provides is ~200 lines of generated `docker-init.sh` supervising
-  `dockerd`/`containerd` without systemd (cgroup v2 delegation, iptables vs
-  nftables). Around it, already wired and inert when off: `setup-docker.sh`,
-  `init: true`, and `DOCKER_CONFIG=/home/vscode/.docker-cli` — **do not** let the
-  CLI fall back to `~/.docker`, where VS Code writes a `credsStore` pointing at a
-  host credential helper that fails in here and breaks every `docker pull`,
-  anonymous ones included. Not the host socket either (that is root on the host,
-  and bind-mount paths in a sibling container resolve against the *host*
-  filesystem).
+  `dockerd`/`containerd` without systemd. Around it, wired and inert when off:
+  `setup-docker.sh`, `init: true`, and `DOCKER_CONFIG=/home/vscode/.docker-cli` —
+  **do not** let the CLI fall back to `~/.docker`, where VS Code writes a
+  `credsStore` pointing at a host credential helper that fails in here and breaks
+  every `docker pull`, anonymous ones included. Not the host socket either.
 - Codex (option `installCodex`, default `false`): `setup-codex.sh` npm-installs
   `@openai/codex`. The CLI only — the login is interactive and deliberately never
   automated. What has to survive is the `~/.codex` volume, not the binary.

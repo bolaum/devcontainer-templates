@@ -34,15 +34,31 @@
         // A Docker daemon INSIDE this container (option `installDocker`), so a
         // project's own compose.yaml is built and run from in here.
         //
-        // The option substitutes the feature's ID, which looks odd until you see
-        // why: the Template spec only replaces strings, it cannot add or remove a
-        // features entry, and the docker-in-docker feature has no off switch of
-        // its own — `version: "none"` still applies its static metadata
-        // (privileged, entrypoint, volumes). So "off" needs *some* id to put here
-        // instead, and that is what ./features/no-docker is: a local feature that
-        // installs nothing.
+        // The option picks a DIRECTORY, which needs explaining. The Template spec
+        // only substitutes strings — it cannot add or remove a features entry —
+        // and the docker-in-docker feature has no off switch of its own
+        // (`version: "none"` still applies its static metadata: privileged, the
+        // entrypoint, the volumes). Substituting the feature ID itself would work,
+        // but then the option's *value* is a feature ID while its *name* reads
+        // like a boolean, and answering it `true` yields a devcontainer.json that
+        // only fails later with "Legacy feature 'true' not supported". Neither the
+        // CLI's `-a` nor the VS Code UI validates the value, so nothing catches it.
         //
-        // Off by default because it makes the container `privileged`, which the
+        // So the option selects ./features/docker-on or ./features/docker-off.
+        // docker-on installs nothing itself and declares `dependsOn` on the real
+        // docker-in-docker feature (with `moby: false`, required on 26.04); the
+        // CLI aggregates metadata across every installed feature, so privileged,
+        // the entrypoint and the two volumes come along. docker-off is empty.
+        //
+        // 'on'/'off' and NOT true/false, which is the second trap: the CLI
+        // substitutes with `templateArgs[name] || ""`, so a falsy value — a JSON
+        // boolean false, notably — lands as an EMPTY STRING. A boolean option
+        // would therefore resolve to "./features/docker-" on its own default.
+        // The same quirk is why PLAYWRIGHT_HEADLESS and INSTALL_CODEX come out as
+        // "" rather than "false" below; the scripts reading them treat empty as
+        // false on purpose.
+        //
+        // Off by default because it makes the container privileged, which the
         // feature requires and does not let you turn off.
         //
         // NOT the host socket (docker-outside-of-docker). Two reasons, and the
@@ -51,10 +67,9 @@
         // against the HOST filesystem, so `./db/data` in a compose.yaml would
         // silently point at nothing.
         //
-        // When on, the feature's defaults bring moby, buildx, compose v2,
+        // When on, the feature brings moby-free Docker CE, buildx, compose v2,
         // DOCKER_BUILDKIT=1, the docker-init.sh entrypoint that starts the daemon,
-        // `privileged: true`, and two volumes named per workspace like the ones
-        // below:
+        // and two volumes named per workspace like the ones below:
         //
         //     dind-var-lib-docker-${devcontainerId}      -> /var/lib/docker
         //     dind-var-lib-containerd-${devcontainerId}  -> /var/lib/containerd
@@ -62,23 +77,7 @@
         // They hold the nested daemon's images, containers and volumes, so a
         // rebuild keeps them. Renaming or moving the project folder changes the id
         // and orphans them, same as the rest.
-        //
-        // VS Code underlines the line below with "Failed to parse feature
-        // identifier" — expected, and not worth chasing. The Dev Containers
-        // extension validates every key of `features` as a real feature ID, and
-        // here it is a placeholder; this file is template SOURCE and is never
-        // consumed as-is. After `apply` the key holds a real ID. The extension
-        // contributes no setting to turn that validation off.
-        //
-        // `moby: false` is required on Ubuntu 26.04: the feature defaults to the
-        // Moby packages, which are not built for 'resolute', and it refuses to
-        // install rather than fall back ("the 'moby' option is not supported on
-        // ubuntu 'resolute'"). false takes Docker CE from Docker's own repo
-        // instead. The placeholder feature declares the same option and ignores
-        // it, since this object is shared by both.
-        "${templateOption:installDocker}": {
-            "moby": false
-        }
+        "./features/docker-${templateOption:installDocker}": {}
     },
     "customizations": {
         "vscode": {

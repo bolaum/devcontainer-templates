@@ -94,7 +94,7 @@ hacking on anything, with version managers so bumping runtimes is trivial.
 | `installPlaywright` | `true` | `true`, `false` |
 | `playwrightHeadless` | `false` | `true`, `false` |
 | `installCodex` | `false` | `true`, `false` |
-| `installDocker` | `./features/no-docker` | `./features/no-docker`, `ghcr.io/devcontainers/features/docker-in-docker:2` |
+| `installDocker` | `off` | `off`, `on` (**not** `true`/`false` — see below) |
 
 ### Verified versions
 
@@ -521,23 +521,39 @@ ships with the template and works in the project you applied it to.
 
 ## Docker inside the container (opt-in)
 
-Option `installDocker`, off by default. Set it to
-`ghcr.io/devcontainers/features/docker-in-docker:2` to get a Docker daemon inside
-this container, so a project's own `compose.yaml` is built and run from in here.
+Option `installDocker`, `off` by default. Set it to `on` for a Docker daemon
+inside this container, so a project's own `compose.yaml` is built and run from in
+here.
 
-**Why the option's value is a feature ID.** The Template spec only substitutes
-strings — it cannot add or remove a features entry — and the docker-in-docker
-feature has no off switch of its own (`version: "none"` still applies its static
-metadata: `privileged`, the entrypoint, the volumes). So the option substitutes the
-feature's *ID*, and "off" needs some ID to put there instead:
-`./features/no-docker`, a local feature that installs nothing.
+```bash
+devcontainer templates apply -t ghcr.io/bolaum/devcontainer-templates/base \
+    -a '{"installDocker":"on"}'
+```
+
+**`on`/`off`, never `true`/`false`.** The CLI substitutes options with
+`templateArgs[name] || ""`, so any falsy value — a JSON `false` above all — lands
+as an **empty string**. A boolean option here would resolve to a feature path that
+does not exist, on its own default. (The same quirk is why `PLAYWRIGHT_HEADLESS`
+and `INSTALL_CODEX` come out as `""` rather than `"false"` in an applied
+`devcontainer.json`; the scripts reading them treat empty as false on purpose.)
+Neither the CLI's `-a` nor the VS Code prompt validates a value against `enum`, so
+a wrong one is only caught much later, by whatever tries to use it.
+
+**Why it selects a directory.** The Template spec only substitutes strings — it
+cannot add or remove a features entry — and docker-in-docker has no off switch of
+its own (`version: "none"` still applies its static metadata: `privileged`, the
+entrypoint, the volumes). So the option picks `./features/docker-on` or
+`./features/docker-off`. The first installs nothing itself and declares
+`dependsOn` on the real feature; the CLI aggregates metadata across every
+installed feature, so `privileged`, the entrypoint and the two volumes come along.
+The second is empty.
 
 It is off by default because it makes the container **privileged**, which the
 feature requires and does not let you turn off.
 
-`moby: false` is passed and is **required on Ubuntu 26.04**: the feature defaults
-to the Moby packages, which are not built for `resolute`, and it refuses to install
-rather than fall back. With `false` it installs Docker CE from
+`moby: false` is set on the dependency and is **required on Ubuntu 26.04**: the
+feature defaults to the Moby packages, which are not built for `resolute`, and it
+refuses to install rather than fall back. With `false` it installs Docker CE from
 `download.docker.com` — `docker-ce`, `docker-ce-cli`, `containerd.io`,
 `docker-buildx-plugin`, `docker-compose-plugin`, i.e. exactly the package set in
 [Docker's own Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/).
@@ -546,10 +562,9 @@ What the feature adds on top of that `apt install` is the part worth not
 rewriting: a container has no systemd, so something has to start and supervise
 `dockerd` and `containerd`, set up cgroup v2 delegation and pick between iptables
 and nftables. That is ~200 lines of generated entrypoint
-(`/usr/local/share/docker-init.sh`), and it is why this uses the feature rather
-than hand-rolled `RUN` lines.
+(`/usr/local/share/docker-init.sh`).
 
-The rest is already in place and inert until you turn it on:
+The rest is already in place and inert while it is off:
 
 - `setup-docker.sh` in `postCreate` waits for the daemon and checks `compose` and
   `buildx`, so a broken daemon fails the create instead of surfacing later as a

@@ -31,8 +31,7 @@ smoke_one() {
     # TEMPLATE_OPTIONS overrides them, space-separated `name=value` — the only way
     # to exercise an option whose default is off:
     #
-    #   TEMPLATE_OPTIONS='installDocker=ghcr.io/devcontainers/features/docker-in-docker:2' \
-    #       bash scripts/test.sh base
+    #   TEMPLATE_OPTIONS='installDocker=on' bash scripts/test.sh base
     if [ "$(jq -r '.options // empty' "$src_dir/devcontainer-template.json")" != "" ]; then
         while IFS= read -r opt; do
             local val esc override

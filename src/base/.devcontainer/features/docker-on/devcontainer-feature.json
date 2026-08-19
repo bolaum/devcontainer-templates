@@ -1,0 +1,11 @@
+{
+    "id": "docker-on",
+    "version": "1.0.0",
+    "name": "Docker on",
+    "description": "Pulls in the official docker-in-docker feature. Selected when installDocker is 'on'. The option is 'on'/'off' rather than true/false because the CLI substitutes a falsy option value as an empty string, which would make the 'false' case resolve to a directory that does not exist.",
+    "dependsOn": {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {
+            "moby": false
+        }
+    }
+}

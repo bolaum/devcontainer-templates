@@ -66,6 +66,24 @@ if [ "$(jq -r '.options // empty' "$meta")" != "" ]; then
             read -r -p "$field_prompt [$default]: " answer < /dev/tty || answer=""
             [ -n "$answer" ] && value="$answer"
         fi
+        # Reject a bad value here rather than substituting it. Neither the
+        # official CLI's `-a` nor the VS Code prompt validates anything, and a
+        # wrong value does not fail at apply time — it lands in devcontainer.json
+        # and blows up much later, in a message that points at the symptom rather
+        # than at the answer you typed. `installDocker` is the cautionary tale:
+        # anything other than true/false there selects a feature directory that
+        # does not exist.
+        otype="$(jq -r ".options.${opt}.type // \"string\"" "$meta")"
+        allowed=""
+        case "$otype" in
+            boolean) allowed="$(printf 'true\nfalse')" ;;
+            *) allowed="$(jq -r "(.options.${opt}.enum // []) | .[]" "$meta")" ;;
+        esac
+        if [ -n "$allowed" ] && ! printf '%s\n' "$allowed" | grep -qxF "$value"; then
+            echo "error: '${value}' is not a valid value for '${opt}' (type ${otype})." >&2
+            echo "       choose one of: $(printf '%s' "$allowed" | paste -sd', ')" >&2
+            exit 1
+        fi
         esc="$(printf '%s' "$value" | sed -e 's/[]\/$*.^[&]/\\&/g')"
         printf 's/\\${templateOption:%s}/%s/g\n' "$opt" "$esc" >> "$sed_script"
         echo "  -> ${opt} = ${value}" >&2
