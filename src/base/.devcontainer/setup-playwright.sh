@@ -76,10 +76,18 @@ console.log("   browser for the MCP server: "+p);' "$(npm root -g)"
 #   --ozone-platform=wayland (headed only) render on the host's compositor through
 #                          the Wayland socket bind-mounted in devcontainer.json, so
 #                          you can watch Claude drive the browser.
+#   --ignore-gpu-blocklist (headed only) without it Chromium refuses the GPU in
+#                          here ("Quit GPU process launch to fallback to
+#                          SwiftShader") even when one is passed through, and
+#                          everything renders in software. With no GPU it still
+#                          falls back to SwiftShader on its own.
+#
+# No --enable-features: Chromium honours only the LAST occurrence, so any of ours
+# would silently replace the one Playwright passes itself.
 if [ "$HEADLESS" = "true" ]; then
     browser_args='"--no-sandbox", "--disable-dev-shm-usage"'
 else
-    browser_args='"--no-sandbox", "--disable-dev-shm-usage", "--ozone-platform=wayland", "--enable-features=UseOzonePlatform"'
+    browser_args='"--no-sandbox", "--disable-dev-shm-usage", "--ozone-platform=wayland", "--ignore-gpu-blocklist"'
 fi
 
 # Written only when absent, so hand edits (a different viewport, extra browser

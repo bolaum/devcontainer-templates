@@ -262,6 +262,30 @@ test -s "$HOME/.codex/auth.json" && echo "ok: logged in" || echo "run 'codex log
 The login is interactive by design and is never automated; the credentials
 persist in the `~/.codex` volume.
 
+## 10. GPU — only if passed through
+
+The tooling passes an NVIDIA GPU only when the host's `docker info` lists an
+`nvidia` runtime (`hostRequirements.gpu` is `optional`). `nvidia-smi` is injected
+with the driver, so its absence means `skipped`, not a failure:
+
+```bash
+command -v nvidia-smi >/dev/null || echo "skipped: no NVIDIA gpu passed through"
+```
+
+Only when it is there:
+
+```bash
+nvidia-smi -L
+ls -l /dev/dri/ /dev/nvidia*           # must be rw for you (postStartCommand)
+echo "$GBM_BACKENDS_PATH"; ls /usr/lib64/gbm/ /usr/lib/x86_64-linux-gnu/gbm/ 2>/dev/null
+```
+
+Then open `chrome://gpu` with the playwright MCP tools and read **`GL_RENDERER`**
+— it must name the NVIDIA card. Do not settle for the "Graphics Feature Status"
+list: it says "Hardware accelerated" even when EGL fell back to `llvmpipe`, which
+is software. Video decode stays in software on NVIDIA (Chromium skips it for
+VA-API); that is expected, not a failure.
+
 ---
 
 ## What only you can confirm

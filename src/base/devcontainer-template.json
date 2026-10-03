@@ -1,6 +1,6 @@
 {
     "id": "base",
-    "version": "1.5.2",
+    "version": "1.6.0",
     "name": "Base (Ubuntu + Claude + pyenv/nvm)",
     "description": "Isolated Ubuntu environment to start any project without polluting the host. Python via the official feature + Poetry, pyenv (with build deps) to compile other versions on demand, Node via nvm, GitHub CLI and a CLI toolbox (jq, ripgrep, fd, sqlite3, ffmpeg…). Claude Code comes preinstalled and preconfigured — settings.json, statusline and auth reused from the host — plus microphone, clipboard and a Playwright browser bridged from the host desktop.",
     "documentationURL": "https://github.com/bolaum/devcontainer-templates/tree/main/src/base",
@@ -68,12 +68,12 @@
         },
         "installDocker": {
             "type": "string",
-            "description": "Run a Docker daemon inside the container (docker-in-docker), so the project's own compose.yaml is built and run from in here. 'on' or 'off' — NOT true/false: the CLI substitutes a falsy option value as an empty string, so a boolean 'false' would resolve to a feature directory that does not exist. Turning it on makes the container privileged, which the feature requires and does not let you turn off.",
+            "description": "Run a Docker daemon inside the container (docker-in-docker), so the project's own compose.yaml is built and run from in here. 'on' or 'off' — NOT true/false: the CLI substitutes a falsy option value as an empty string, so a boolean 'false' would resolve to a feature directory that does not exist. On by default; it makes the container privileged, which the feature requires and does not let you turn off — set 'off' for an unprivileged container.",
             "enum": [
-                "off",
-                "on"
+                "on",
+                "off"
             ],
-            "default": "off"
+            "default": "on"
         },
         "claudeLanguage": {
             "type": "string",

@@ -29,9 +29,9 @@ smoke_one() {
 
     # Substitute ${templateOption:x} with each option's default (mimics `apply`).
     # TEMPLATE_OPTIONS overrides them, space-separated `name=value` — the only way
-    # to exercise an option whose default is off:
+    # to exercise a value other than the default:
     #
-    #   TEMPLATE_OPTIONS='installDocker=on' bash scripts/test.sh base
+    #   TEMPLATE_OPTIONS='installDocker=off' bash scripts/test.sh base
     if [ "$(jq -r '.options // empty' "$src_dir/devcontainer-template.json")" != "" ]; then
         while IFS= read -r opt; do
             local val esc override
@@ -63,10 +63,17 @@ smoke_one() {
     fi
     DOCKER_BUILDKIT=1 devcontainer up "${up_args[@]}"
 
+    # A failing test.sh must not skip the cleanup below: the container would be
+    # left running with its workspace bind pointing at $src_dir, which the next
+    # run deletes and recreates — `devcontainer up` then reuses that container
+    # and every exec fails with "current working directory is outside of
+    # container mount namespace root".
+    local status=0
     if [ -d "$src_dir/test-project" ]; then
         echo "==> [${id}] running test.sh"
         devcontainer exec --workspace-folder "$src_dir" --id-label "$id_label" \
-            /bin/sh -c 'if [ "$(id -u)" = "0" ]; then chmod +x ./test-project/test.sh; else sudo chmod +x ./test-project/test.sh; fi && cd ./test-project && ./test.sh'
+            /bin/sh -c 'if [ "$(id -u)" = "0" ]; then chmod +x ./test-project/test.sh; else sudo chmod +x ./test-project/test.sh; fi && cd ./test-project && ./test.sh' \
+            || status=$?
     fi
 
     echo "==> [${id}] cleanup"
@@ -90,6 +97,7 @@ smoke_one() {
         done
     fi
     rm -rf "$src_dir"
+    return "$status"
 }
 
 NO_CACHE="${NO_CACHE:-0}"

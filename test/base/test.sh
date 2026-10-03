@@ -102,6 +102,10 @@ check "MCP disables chrome sandbox" bash -c "grep -q -- '--no-sandbox' \$HOME/.c
 # Headed by default, rendering on the host compositor through the Wayland socket.
 check "browser is headed" bash -c "grep -q '\"headless\": false' \$HOME/.claude/playwright-mcp.json"
 check "wayland platform flag" bash -c "grep -q -- '--ozone-platform=wayland' \$HOME/.claude/playwright-mcp.json"
+# Without it Chromium refuses a passed-through GPU and renders in software.
+check "gpu blocklist ignored" bash -c "grep -q -- '--ignore-gpu-blocklist' \$HOME/.claude/playwright-mcp.json"
+# Chromium honours only the last --enable-features; ours would replace Playwright's.
+check "no --enable-features of our own" bash -c "! grep -q -- '--enable-features' \$HOME/.claude/playwright-mcp.json"
 check "XDG_RUNTIME_DIR writable" bash -c '[ -w "$XDG_RUNTIME_DIR" ]'
 check "chromium actually runs" bash -lic 'CHROME=$(find "$HOME/.cache/ms-playwright" -type f -name chrome | head -1); "$CHROME" --headless --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null'
 # @playwright/mcp pins an alpha Playwright whose Chromium revision differs from
@@ -154,9 +158,9 @@ check "history flushed on every command" bash -c '
 # The end-to-end checker ships with the template (cwd here is <workspace>/test-project).
 check "persistence checker present" bash -c 'test -x "$(dirname "$PWD")/.devcontainer/check-persistence.sh"'
 
-# Docker, only when installDocker is 'on'. With the default ('off') there is no
-# docker CLI and these are skipped — run them with:
-#   TEMPLATE_OPTIONS='installDocker=on' bash scripts/test.sh base
+# Docker, only when installDocker is 'on' (the default). With 'off' there is no
+# docker CLI and these are skipped — exercise that path with:
+#   TEMPLATE_OPTIONS='installDocker=off' bash scripts/test.sh base
 if command -v docker >/dev/null 2>&1; then
     check "nested docker daemon up" docker info
     check "docker compose plugin" docker compose version
@@ -173,6 +177,40 @@ if command -v docker >/dev/null 2>&1; then
         done'
 else
     echo "⏭️  docker checks skipped (installDocker is off)"
+fi
+
+# NVIDIA GPU, only when the tooling passed one through (hostRequirements.gpu is
+# "optional": the CLI adds --gpus all only when `docker info` lists an nvidia
+# runtime). Skipped on GPU-less hosts and CI.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    check "nvidia gpu visible" nvidia-smi -L
+    # postStartCommand chmods these; otherwise they are root:<host render gid>.
+    check "render node usable by $(id -un)" bash -c 'for n in /dev/dri/renderD*; do [ -r "$n" ] && [ -w "$n" ] || exit 1; done'
+    check "nvidia gbm backend on GBM_BACKENDS_PATH" bash -c '
+        IFS=: read -ra dirs <<< "$GBM_BACKENDS_PATH"
+        for d in "${dirs[@]}"; do [ -e "$d/nvidia-drm_gbm.so" ] && exit 0; done; exit 1'
+    # The check that matters: chrome://gpu reports "Hardware accelerated" even
+    # when EGL fell back to llvmpipe, so read the renderer itself. Launches the
+    # browser with the MCP config's own args — a window flashes on the desktop.
+    if [ "${INSTALL_PLAYWRIGHT:-true}" = "true" ]; then
+        check "chromium renders on the nvidia gpu" bash -lic 'node -e "
+            const { chromium } = require(require(\"path\").join(\"$(npm root -g)\", \"playwright\"));
+            const o = require(process.env.HOME + \"/.claude/playwright-mcp.json\").browser.launchOptions;
+            (async () => {
+                const b = await chromium.launch(o);
+                const p = await b.newPage();
+                await p.goto(\"chrome://gpu\");
+                await p.waitForTimeout(2000);
+                const t = await p.evaluate(() => [...document.querySelector(\"info-view\").shadowRoot.children].map(c => c.innerText || \"\").join(\"\\n\"));
+                await b.close();
+                const r = (t.match(/GL_RENDERER[^\\n]*/) || [\"GL_RENDERER not found\"])[0];
+                console.log(r);
+                process.exit(/NVIDIA/.test(r) ? 0 : 1);
+            })().catch(e => { console.error(e.message); process.exit(1); });
+        "'
+    fi
+else
+    echo "⏭️  gpu checks skipped (no NVIDIA gpu passed through)"
 fi
 
 # Report results

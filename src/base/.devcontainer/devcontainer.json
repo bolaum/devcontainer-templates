@@ -58,8 +58,10 @@
         // "" rather than "false" below; the scripts reading them treat empty as
         // false on purpose.
         //
-        // Off by default because it makes the container privileged, which the
-        // feature requires and does not let you turn off.
+        // On by default: building and running a project's own containers is
+        // ordinary work here. The price is a PRIVILEGED container, which the
+        // feature requires and does not let you turn off — set the option to
+        // 'off' when you want an unprivileged one.
         //
         // NOT the host socket (docker-outside-of-docker). Two reasons, and the
         // second is the practical one: handing over /var/run/docker.sock is root
@@ -171,6 +173,23 @@
     // and containerd in the background, and without an init as PID 1 their dead
     // children have no one to wait on them. Costs one tiny process.
     "init": true,
+    // NVIDIA GPU, when the host has one — and nothing at all when it does not.
+    // A hard `--gpus all` in runArgs would refuse to start on a GPU-less host
+    // (CI runners included); "optional" makes the tooling add it only when it
+    // detects a GPU. The catch is HOW it detects: the CLI and VS Code look for
+    // an `nvidia` runtime in `docker info`, which nvidia-container-toolkit does
+    // not register by itself. Once per host:
+    //
+    //     sudo nvidia-ctk runtime configure --runtime=docker
+    //     sudo systemctl restart docker
+    //
+    // The runtime is only the detection signal: Docker 29 resolves `--gpus all`
+    // through CDI and injects the driver's userspace (EGL, GBM, Vulkan, NVDEC)
+    // matching the host's kernel module. Headed Chromium then renders on the
+    // GPU — see GBM_BACKENDS_PATH below and the flags in setup-playwright.sh.
+    "hostRequirements": {
+        "gpu": "optional"
+    },
     "containerEnv": {
         "PULSE_SERVER": "unix:/run/host-pulse",
         // An absolute WAYLAND_DISPLAY is used as-is, so the socket does not have
@@ -183,6 +202,13 @@
         // Dockerfile creates it since the container has no logind session. In
         // /run for the same reason as the sockets above.
         "XDG_RUNTIME_DIR": "/run/xdg-runtime",
+        // The NVIDIA GBM backend lands wherever the HOST distro keeps it —
+        // /usr/lib64/gbm on openSUSE/Fedora — and Ubuntu's libgbm only searches
+        // its own multiarch dir. Without it Chromium's Wayland buffers fail
+        // ("Cannot create bo") and EGL silently falls back to llvmpipe, which
+        // chrome://gpu still reports as "Hardware accelerated". Both dirs, so
+        // Mesa's own backend keeps working. Harmless with no GPU.
+        "GBM_BACKENDS_PATH": "/usr/lib64/gbm:/usr/lib/x86_64-linux-gnu/gbm",
         // The docker CLI's own config dir, deliberately NOT ~/.docker. VS Code
         // writes a `credsStore` in there pointing at a credential helper that
         // proxies to the host, and that helper fails in this container ("error
@@ -202,6 +228,14 @@
     },
     "initializeCommand": "bash .devcontainer/initialize.sh",
     "postCreateCommand": "bash .devcontainer/postCreate.sh",
+    // GPU device nodes come in owned by root and the HOST's video/render GIDs,
+    // which mean nothing in here, so the remote user cannot open them. That
+    // includes NVIDIA's own nodes on distros that ship them 0660 to `video`
+    // (openSUSE does): nvidia-smi then fails with "Insufficient Permissions".
+    // The nodes are the container's own copies (the host's stay untouched), and
+    // /dev is recreated on every start — hence postStart, not postCreate.
+    // No-op without a GPU.
+    "postStartCommand": "sudo chmod a+rw /dev/dri/card* /dev/dri/renderD* /dev/nvidia[0-9]* /dev/nvidiactl /dev/nvidia-modeset 2>/dev/null || true",
     "remoteUser": "vscode",
     "updateRemoteUserUID": true
 }

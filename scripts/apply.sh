@@ -71,7 +71,7 @@ if [ "$(jq -r '.options // empty' "$meta")" != "" ]; then
         # wrong value does not fail at apply time — it lands in devcontainer.json
         # and blows up much later, in a message that points at the symptom rather
         # than at the answer you typed. `installDocker` is the cautionary tale:
-        # anything other than true/false there selects a feature directory that
+        # anything other than on/off there selects a feature directory that
         # does not exist.
         otype="$(jq -r ".options.${opt}.type // \"string\"" "$meta")"
         allowed=""

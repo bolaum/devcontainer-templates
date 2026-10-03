@@ -93,6 +93,10 @@ RUN printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > /etc/a
 # not re-install ~200 MB of packages every time. The list is what
 # `playwright install-deps --dry-run chromium` asks for on Ubuntu; the
 # browser binary itself is installed in postCreate into a shared volume.
+# Plus libegl1, which that list does not ask for: it is the glvnd EGL loader
+# Chromium's ANGLE goes through to reach a real GPU driver. Without it the
+# browser silently renders with SwiftShader even with an NVIDIA GPU passed
+# through — the driver's libEGL_nvidia is injected, but nothing loads it.
 ARG INSTALL_PLAYWRIGHT=true
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -115,6 +119,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
             libavahi-common-data \
             libavahi-common3 \
             libcups2t64 \
+            libegl1 \
             libfontenc1 \
             libxaw7 \
             libxcomposite1 \

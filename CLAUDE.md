@@ -231,6 +231,26 @@ Two mechanisms, both load-bearing — do not "simplify" them away:
   Headed by default (option `playwrightHeadless`, default `false`): the browser is a
   native Wayland client of the host compositor via `--ozone-platform=wayland` and the
   socket already mounted for the clipboard, so you can watch Claude navigate.
+- **GPU (NVIDIA only, on purpose — it is what the maintainer has).** Three
+  pieces, each found by testing on the real host, and each silent when missing:
+  `hostRequirements.gpu: "optional"` (the tooling adds `--gpus all` only when
+  `docker info` lists an `nvidia` runtime — registered once per host with
+  `nvidia-ctk runtime configure`; a hard `--gpus` in `runArgs` would break
+  GPU-less hosts and CI); `GBM_BACKENDS_PATH` in `containerEnv` (CDI mounts the
+  NVIDIA GBM backend at the host's path, `/usr/lib64/gbm` on openSUSE, which
+  Ubuntu's libgbm never searches — Chromium then falls back to llvmpipe while
+  `chrome://gpu` still says "Hardware accelerated"; check `GL_RENDERER`); a
+  `postStartCommand` that `chmod`s `/dev/dri/*` and `/dev/nvidia*` (the final
+  `USER root` makes the nodes `root:<host render/video gid>`, unreadable to
+  `vscode` — openSUSE ships even `/dev/nvidia*` 0660, and nvidia-smi then says
+  "Insufficient Permissions"; they are the container's own copies). Plus
+  `--ignore-gpu-blocklist` in the headed Chromium args, without which Chromium
+  refuses the GPU outright, and `libegl1` in the Playwright apt layer (the glvnd
+  loader ANGLE needs to reach `libEGL_nvidia`; Playwright's dependency list does
+  not include it, and without it Chromium falls back to SwiftShader). Video decode stays in
+  software: Chromium does not use VA-API on NVIDIA. Never add a second
+  `--enable-features` to the Chromium args — only the last one counts, and it
+  would replace Playwright's own.
 - CLI tools are split across two layers on purpose:
   - the **base layer** has jq, ripgrep, fd-find (symlinked to `fd`), tree,
     unzip/zip, less, ffmpeg, imagemagick. ffmpeg and imagemagick live here because
@@ -248,7 +268,7 @@ Two mechanisms, both load-bearing — do not "simplify" them away:
     completions from the binary at shell start (never vendored, so they cannot lag
     the justfile). On 26.04 ImageMagick is 7 and the command is `magick` —
     `convert` survives only as a legacy alternative.
-- **Docker (option `installDocker`, `off` by default).** Two traps live here,
+- **Docker (option `installDocker`, `on` by default).** Two traps live here,
   both about how the CLI substitutes options.
   *First*, the value is `on`/`off`, **never** `true`/`false`: substitution is
   `templateArgs[name] || ""`, so a falsy value lands as an EMPTY STRING — a
